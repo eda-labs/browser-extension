@@ -1,6 +1,6 @@
 # EDA Browser Extension
 
-Firefox extension for connecting browser pages to an EDA backend with authenticated proxy requests.
+Browser extension for connecting browser pages to an EDA backend with authenticated proxy requests.
 
 ## What It Does
 
@@ -15,7 +15,7 @@ Firefox extension for connecting browser pages to an EDA backend with authentica
 
 - Node.js 18+ (recommended)
 - npm
-- Firefox (for `web-ext run`)
+- Firefox or Chromium-based browser (Chrome/Edge/Brave)
 
 ## Install
 
@@ -32,6 +32,13 @@ npm install
 - `npm run lint`: lint built extension with `web-ext lint`
 - `npm run package`: build + lint + create extension package
 - `npm run clean`: remove `dist/` and `web-ext-artifacts/`
+
+## Browser Support
+
+- Runtime code is written against a `browser`/`chrome` compatible API wrapper.
+- Current development workflow is Firefox-first (`web-ext run`).
+- Current manifest is also Firefox-first (`manifest_version: 3` with `background.scripts` and `browser_specific_settings.gecko`).
+- For Chromium packaging/loading, use a Chromium-specific manifest variant (notably `background.service_worker` instead of `background.scripts`).
 
 ## Development Workflow
 
@@ -124,7 +131,6 @@ When connection state changes, pages receive:
 ## Permissions and Security Notes
 
 - Manifest uses `storage` permission and `<all_urls>` host/content script matching.
-- Do not commit real credentials or environment secrets.
+- Do not commit production credentials or environment secrets.
 - Avoid logging tokens or sensitive payloads.
 - Treat any page integration using `window.postMessage` as trusted-only logic within your environment.
-
