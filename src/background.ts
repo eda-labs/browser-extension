@@ -30,11 +30,16 @@ function decodeJwtExp(jwt: string): number {
 async function fetchToken(edaUrl: string, realmPath: string, params: Record<string, string>): Promise<TokenResponse> {
   const url = edaUrl.replace(/\/+$/, '') +
     '/core/httpproxy/v1/keycloak/realms/' + realmPath + '/protocol/openid-connect/token';
-  const res = await fetch(url, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
-    body: new URLSearchParams(params).toString(),
-  });
+  let res: Response;
+  try {
+    res = await fetch(url, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+      body: new URLSearchParams(params).toString(),
+    });
+  } catch {
+    throw new Error('TLS_CERT_ERROR');
+  }
   if (!res.ok) {
     const text = await res.text();
     throw new Error('Token request failed (' + res.status + '): ' + text);
@@ -57,10 +62,15 @@ async function fetchClientSecret(edaUrl: string, username: string, password: str
   const kcToken = await fetchKeycloakToken(edaUrl, username, password);
   const authHeader = { Authorization: 'Bearer ' + kcToken };
 
-  const clientsRes = await fetch(
-    base + '/admin/realms/eda/clients?clientId=eda',
-    { headers: authHeader },
-  );
+  let clientsRes: Response;
+  try {
+    clientsRes = await fetch(
+      base + '/admin/realms/eda/clients?clientId=eda',
+      { headers: authHeader },
+    );
+  } catch {
+    throw new Error('TLS_CERT_ERROR');
+  }
   if (!clientsRes.ok) {
     const text = await clientsRes.text();
     throw new Error('Failed to list Keycloak clients (' + clientsRes.status + '): ' + text);
@@ -71,10 +81,15 @@ async function fetchClientSecret(edaUrl: string, username: string, password: str
   }
   const clientUuid = clients[0].id;
 
-  const secretRes = await fetch(
-    base + '/admin/realms/eda/clients/' + clientUuid + '/client-secret',
-    { headers: authHeader },
-  );
+  let secretRes: Response;
+  try {
+    secretRes = await fetch(
+      base + '/admin/realms/eda/clients/' + clientUuid + '/client-secret',
+      { headers: authHeader },
+    );
+  } catch {
+    throw new Error('TLS_CERT_ERROR');
+  }
   if (!secretRes.ok) {
     const text = await secretRes.text();
     throw new Error('Failed to fetch client secret (' + secretRes.status + '): ' + text);

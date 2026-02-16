@@ -191,7 +191,13 @@ function PopupApp() {
       } else {
         setStatus('error');
         setActiveTargetId(null);
-        setError((result?.error as string) || 'Connection failed');
+        const err = (result?.error as string) || 'Connection failed';
+        if (err === 'TLS_CERT_ERROR') {
+          setError('TLS certificate not trusted. Open the EDA URL in a tab and accept the certificate first.');
+          window.open('https://' + editEdaUrl, '_blank');
+        } else {
+          setError(err);
+        }
       }
     } catch (err) {
       setStatus('error');
@@ -222,7 +228,13 @@ function PopupApp() {
       setKcUsername('');
       setKcPassword('');
     } else {
-      setSecretError((result.error as string) || 'Failed to fetch client secret');
+      const err = (result.error as string) || 'Failed to fetch client secret';
+      if (err === 'TLS_CERT_ERROR') {
+        setSecretError('TLS certificate not trusted. Open the EDA URL in a tab and accept the certificate first.');
+        window.open('https://' + editEdaUrl, '_blank');
+      } else {
+        setSecretError(err);
+      }
     }
   }
 

@@ -15,7 +15,7 @@ export interface BrowserAPI {
     };
   };
   alarms: {
-    create: (name: string, info: { periodInMinutes: number }) => void;
+    create: (name: string, info: { periodInMinutes?: number; delayInMinutes?: number }) => void;
     clear: (name: string) => void;
     onAlarm: {
       addListener: (callback: (alarm: { name: string }) => void) => void;
