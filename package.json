@@ -11,6 +11,7 @@
     "package": "npm run build && web-ext lint --source-dir dist/firefox && web-ext build --source-dir dist/firefox --overwrite-dest && web-ext build --source-dir dist/chromium --overwrite-dest",
     "package:firefox": "npm run build:firefox && web-ext lint --source-dir dist/firefox && web-ext sign --source-dir dist/firefox --channel unlisted",
     "package:chromium": "npm run build:chromium && web-ext build --source-dir dist/chromium --overwrite-dest",
+    "package:crx": "npm run build:chromium && crx3 -o web-ext-artifacts/eda_browser_extension.crx -p key.pem dist/chromium",
     "dev": "npm run build:firefox && web-ext run --source-dir dist/firefox",
     "clean": "rm -rf dist web-ext-artifacts"
   },
@@ -26,6 +27,7 @@
   "devDependencies": {
     "@types/react": "^19.0.0",
     "@types/react-dom": "^19.0.0",
+    "crx3": "^2.0.0",
     "esbuild": "^0.24.0",
     "typescript": "^5.7.0",
     "web-ext": "^8.3.0"

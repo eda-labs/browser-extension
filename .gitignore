@@ -3,5 +3,7 @@ dist/
 web-ext-artifacts/
 *.zip
 *.xpi
+*.pem
+*.crx
 AGENTS.md
 CLAUDE.md
