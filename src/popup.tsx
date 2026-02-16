@@ -20,11 +20,13 @@ import {
   Chip,
   LinearProgress,
   InputAdornment,
+  IconButton,
   CircularProgress,
 } from '@mui/material';
 import theme from './theme';
 import { api } from './core/api';
 import { type ConnectionStatus, type TargetProfile } from './core/types';
+import OpenInNewIcon from '@mui/icons-material/OpenInNew';
 
 const statusColors: Record<ConnectionStatus, string> = {
   disconnected: '#8994a3',
@@ -240,9 +242,14 @@ function PopupApp() {
       <Box sx={{ width: 340, bgcolor: 'background.default', display: 'grid', gridTemplateColumns: '1fr' }}>
         {status === 'connecting' && <LinearProgress sx={{ height: 3 }} />}
         <Box sx={{ px: 2, pt: 2, pb: 1.5, display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
-          <Typography variant="h6" sx={{ fontSize: 15, fontWeight: 600 }}>
-            EDA Connection
-          </Typography>
+          <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
+            <a href="https://eda.dev" target="_blank" rel="noopener noreferrer" style={{ display: 'flex' }}>
+              <img src="icons/icon-128.png" width={16} height={16} alt="" />
+            </a>
+            <Typography variant="h6" sx={{ fontSize: 15, fontWeight: 600 }}>
+              EDA Connection
+            </Typography>
+          </Box>
           <Chip
             size="small"
             label={statusLabels[status]}
@@ -313,6 +320,18 @@ function PopupApp() {
                     <Typography sx={{ color: 'text.secondary', fontSize: 'inherit', whiteSpace: 'nowrap' }}>https://&nbsp;</Typography>
                   </InputAdornment>
                 ),
+                endAdornment: editEdaUrl ? (
+                  <InputAdornment position="end">
+                    <IconButton
+                      size="small"
+                      edge="end"
+                      onClick={() => window.open('https://' + editEdaUrl, '_blank')}
+                      title="Open in new tab"
+                    >
+                      <OpenInNewIcon fontSize="small" />
+                    </IconButton>
+                  </InputAdornment>
+                ) : null,
               },
             }}
           />
