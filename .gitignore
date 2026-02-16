@@ -3,3 +3,5 @@ dist/
 web-ext-artifacts/
 *.zip
 *.xpi
+AGENTS.md
+CLAUDE.md
