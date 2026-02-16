@@ -1,12 +1,12 @@
+import { api } from './core/api';
 import {
-  api,
   type EdaState,
   type StoredConfig,
   type TokenResponse,
   type ConnectResult,
   type ProxyResponse,
   type TargetProfile,
-} from './types';
+} from './core/types';
 
 let state: EdaState = {
   status: 'disconnected',
@@ -123,17 +123,20 @@ async function connect(
       refreshToken: state.refreshToken,
       accessTokenExpiresAt: state.accessTokenExpiresAt,
       activeTargetId: targetId,
+      connectionStatus: state.status,
     });
 
     scheduleRefresh();
-    persistStatus();
     return { ok: true };
   } catch (err) {
     state.status = 'error';
     state.accessToken = null;
     state.refreshToken = null;
     state.activeTargetId = null;
-    persistStatus();
+    await api.storage.local.set({
+      connectionStatus: state.status,
+      activeTargetId: state.activeTargetId,
+    });
     return { ok: false, error: err instanceof Error ? err.message : String(err) };
   }
 }
@@ -273,7 +276,9 @@ api.runtime.onMessage.addListener((message, _sender, sendResponse) => {
       message.username as string,
       message.password as string,
       message.clientSecret as string,
-    ).then(sendResponse);
+    ).then(sendResponse).catch((err) => {
+      sendResponse({ ok: false, error: err instanceof Error ? err.message : String(err) });
+    });
     return true;
   }
 

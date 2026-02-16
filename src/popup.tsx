@@ -17,32 +17,14 @@ import {
   DialogTitle,
   DialogContent,
   DialogActions,
-  InputAdornment,
-  IconButton,
   Chip,
+  LinearProgress,
+  InputAdornment,
+  CircularProgress,
 } from '@mui/material';
 import theme from './theme';
-import { api, type ConnectionStatus, type TargetProfile } from './types';
-
-function VisibilityIcon({ visible }: { visible: boolean }) {
-  return (
-    <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-      {visible ? (
-        <>
-          <path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z" />
-          <circle cx="12" cy="12" r="3" />
-        </>
-      ) : (
-        <>
-          <path d="M17.94 17.94A10.07 10.07 0 0 1 12 20c-7 0-11-8-11-8a18.45 18.45 0 0 1 5.06-5.94" />
-          <path d="M9.9 4.24A9.12 9.12 0 0 1 12 4c7 0 11 8 11 8a18.5 18.5 0 0 1-2.16 3.19" />
-          <path d="M14.12 14.12a3 3 0 1 1-4.24-4.24" />
-          <line x1="1" y1="1" x2="23" y2="23" />
-        </>
-      )}
-    </svg>
-  );
-}
+import { api } from './core/api';
+import { type ConnectionStatus, type TargetProfile } from './core/types';
 
 const statusColors: Record<ConnectionStatus, string> = {
   disconnected: '#8994a3',
@@ -75,12 +57,10 @@ function PopupApp() {
   const [kcPassword, setKcPassword] = useState('');
   const [fetchingSecret, setFetchingSecret] = useState(false);
   const [secretError, setSecretError] = useState('');
-  const [showPassword, setShowPassword] = useState(false);
-  const [showSecret, setShowSecret] = useState(false);
-
   const selectedIsActive = selectedTargetId != null && selectedTargetId === activeTargetId;
   const locked = selectedIsActive && (status === 'connected' || status === 'connecting');
   const formFilled = editEdaUrl && editUsername && password && clientSecret;
+  console.log('[EDA] render:', { selectedTargetId, activeTargetId, status, selectedIsActive, locked });
 
   useEffect(() => {
     (async () => {
@@ -101,10 +81,13 @@ function PopupApp() {
     })();
 
     const onChange = (changes: Record<string, { oldValue?: unknown; newValue?: unknown }>) => {
+      console.log('[EDA] onChanged:', Object.keys(changes), JSON.stringify(changes));
       if (changes.connectionStatus) {
+        console.log('[EDA] onChanged setting status:', changes.connectionStatus.newValue);
         setStatus((changes.connectionStatus.newValue as ConnectionStatus) ?? 'disconnected');
       }
       if (changes.activeTargetId) {
+        console.log('[EDA] onChanged setting activeTargetId:', changes.activeTargetId.newValue);
         setActiveTargetId((changes.activeTargetId.newValue as string) ?? null);
       }
       if (changes.targets) {
@@ -120,7 +103,7 @@ function PopupApp() {
     if (!target) return;
     setSelectedTargetId(id);
     setIsNewTarget(false);
-    setEditEdaUrl(target.edaUrl);
+    setEditEdaUrl(target.edaUrl.replace(/^https?:\/\//i, ''));
     setEditUsername(target.username);
     setClientSecret(target.clientSecret);
     setPassword('');
@@ -138,19 +121,23 @@ function PopupApp() {
   }
 
   async function handleSaveTarget(): Promise<TargetProfile> {
-    const id = isNewTarget ? crypto.randomUUID() : selectedTargetId!;
+    const edaUrl = 'https://' + editEdaUrl.replace(/\/+$/, '');
+    const id = edaUrl;
     const target: TargetProfile = {
       id,
-      edaUrl: editEdaUrl.replace(/\/+$/, ''),
+      edaUrl,
       username: editUsername,
       clientSecret,
     };
 
     const stored = await api.storage.local.get(['targets']);
     const existing = (stored.targets as TargetProfile[] | undefined) ?? [];
-    const idx = existing.findIndex((t) => t.id === id);
-    if (idx >= 0) {
-      existing[idx] = target;
+    const oldIdx = selectedTargetId ? existing.findIndex((t) => t.id === selectedTargetId) : -1;
+    const newIdx = existing.findIndex((t) => t.id === id);
+    if (oldIdx >= 0) {
+      existing[oldIdx] = target;
+    } else if (newIdx >= 0) {
+      existing[newIdx] = target;
     } else {
       existing.push(target);
     }
@@ -187,23 +174,44 @@ function PopupApp() {
   async function handleConnect() {
     setError('');
     const target = await handleSaveTarget();
+    console.log('[EDA] handleConnect: saved target', target.id);
+    setSelectedTargetId(target.id);
+    setActiveTargetId(target.id);
+    setStatus('connecting');
 
-    const result = await api.runtime.sendMessage({
-      type: 'eda-connect',
-      targetId: target.id,
-      edaUrl: target.edaUrl,
-      username: target.username,
-      password,
-      clientSecret: target.clientSecret,
-    });
+    try {
+      console.log('[EDA] handleConnect: sending eda-connect message...');
+      const result = await api.runtime.sendMessage({
+        type: 'eda-connect',
+        targetId: target.id,
+        edaUrl: target.edaUrl,
+        username: target.username,
+        password,
+        clientSecret: target.clientSecret,
+      });
+      console.log('[EDA] handleConnect: got result', JSON.stringify(result));
 
-    if (!result.ok) {
-      setError((result.error as string) || 'Connection failed');
+      if (result && result.ok) {
+        console.log('[EDA] handleConnect: success, setting connected');
+        setStatus('connected');
+      } else {
+        console.log('[EDA] handleConnect: failed', result?.error);
+        setStatus('error');
+        setActiveTargetId(null);
+        setError((result?.error as string) || 'Connection failed');
+      }
+    } catch (err) {
+      console.log('[EDA] handleConnect: exception', err);
+      setStatus('error');
+      setActiveTargetId(null);
+      setError(err instanceof Error ? err.message : 'Connection failed');
     }
   }
 
   async function handleDisconnect() {
     await api.runtime.sendMessage({ type: 'eda-disconnect' });
+    setStatus('disconnected');
+    setActiveTargetId(null);
   }
 
   async function handleFetchSecret() {
@@ -211,7 +219,7 @@ function PopupApp() {
     setSecretError('');
     const result = await api.runtime.sendMessage({
       type: 'eda-fetch-client-secret',
-      edaUrl: editEdaUrl.replace(/\/+$/, ''),
+      edaUrl: 'https://' + editEdaUrl.replace(/\/+$/, ''),
       username: kcUsername,
       password: kcPassword,
     });
@@ -230,6 +238,7 @@ function PopupApp() {
     <ThemeProvider theme={theme}>
       <CssBaseline />
       <Box sx={{ width: 340, bgcolor: 'background.default', display: 'grid', gridTemplateColumns: '1fr' }}>
+        {status === 'connecting' && <LinearProgress sx={{ height: 3 }} />}
         <Box sx={{ px: 2, pt: 2, pb: 1.5, display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
           <Typography variant="h6" sx={{ fontSize: 15, fontWeight: 600 }}>
             EDA Connection
@@ -291,12 +300,21 @@ function PopupApp() {
         <Box sx={{ px: 2, pt: 1.5, display: 'grid', gap: 1.5 }}>
           <TextField
             label="EDA URL"
-            placeholder="https://eda.example.com"
+            placeholder="eda.example.com"
             fullWidth
             value={editEdaUrl}
-            onChange={(e) => setEditEdaUrl(e.target.value)}
+            onChange={(e) => setEditEdaUrl(e.target.value.replace(/^https?:\/\//i, ''))}
             disabled={locked}
             size="small"
+            slotProps={{
+              input: {
+                startAdornment: (
+                  <InputAdornment position="start" sx={{ mr: 0 }}>
+                    <Typography sx={{ color: 'text.secondary', fontSize: 'inherit', whiteSpace: 'nowrap' }}>https://&nbsp;</Typography>
+                  </InputAdornment>
+                ),
+              },
+            }}
           />
         </Box>
 
@@ -318,24 +336,14 @@ function PopupApp() {
           />
           <TextField
             label="Password"
-            type={showPassword ? 'text' : 'password'}
+            type="password"
             placeholder="EDA User Password"
             fullWidth
             value={locked ? '' : password}
             onChange={(e) => setPassword(e.target.value)}
             disabled={locked}
             size="small"
-            slotProps={{
-              input: {
-                endAdornment: (
-                  <InputAdornment position="end">
-                    <IconButton size="small" onClick={() => setShowPassword(!showPassword)} edge="end">
-                      <VisibilityIcon visible={showPassword} />
-                    </IconButton>
-                  </InputAdornment>
-                ),
-              },
-            }}
+            sx={{ '& input::-ms-reveal, & input::-webkit-credentials-auto-fill-button': { display: 'none' } }}
           />
         </Box>
 
@@ -348,24 +356,14 @@ function PopupApp() {
         <Box sx={{ px: 2, pt: 1.5, pb: 0.5, display: 'grid', gap: 1.5 }}>
           <TextField
             label="Client Secret"
-            type={showSecret ? 'text' : 'password'}
+            type="password"
             placeholder="Paste or fetch below"
             fullWidth
             value={locked ? '' : clientSecret}
             onChange={(e) => setClientSecret(e.target.value)}
             disabled={locked}
             size="small"
-            slotProps={{
-              input: {
-                endAdornment: (
-                  <InputAdornment position="end">
-                    <IconButton size="small" onClick={() => setShowSecret(!showSecret)} edge="end">
-                      <VisibilityIcon visible={showSecret} />
-                    </IconButton>
-                  </InputAdornment>
-                ),
-              },
-            }}
+            sx={{ '& input::-ms-reveal, & input::-webkit-credentials-auto-fill-button': { display: 'none' } }}
           />
           <Button
             variant="outlined"
@@ -385,32 +383,29 @@ function PopupApp() {
           )}
 
           <Box sx={{ display: 'grid', gridTemplateColumns: 'auto auto 1fr auto', gap: 1 }}>
-            <Button
-              variant="outlined"
-              onClick={() => void handleSaveTarget()}
-              disabled={!editEdaUrl || locked}
-              size="small"
-            >
-              Save
-            </Button>
-            {selectedTargetId && !isNewTarget ? (
+            {!locked && (
+              <Button variant="outlined" onClick={() => void handleSaveTarget()} disabled={!editEdaUrl} size="small">
+                Save
+              </Button>
+            )}
+            {selectedTargetId && !isNewTarget && !locked ? (
               <Button
                 variant="outlined"
                 color="error"
                 onClick={() => setDeleteDialogOpen(true)}
-                disabled={locked}
                 size="small"
               >
                 Delete
               </Button>
-            ) : <span />}
-            <span />
-            {selectedIsActive && status === 'connected' ? (
+            ) : !locked ? <span /> : null}
+            {!locked ? <span /> : <span style={{ gridColumn: '1 / -1' }} />}
+            {locked ? (
               <Button
                 variant="contained"
                 color="error"
                 onClick={() => void handleDisconnect()}
                 size="small"
+                sx={{ gridColumn: '-2 / -1' }}
               >
                 Disconnect
               </Button>
@@ -421,7 +416,7 @@ function PopupApp() {
                 disabled={!formFilled || status === 'connecting'}
                 size="small"
               >
-                {status === 'connecting' ? 'Connecting...' : 'Connect'}
+                Connect
               </Button>
             )}
           </Box>
@@ -465,6 +460,7 @@ function PopupApp() {
             onChange={(e) => setKcPassword(e.target.value)}
             disabled={fetchingSecret}
             size="small"
+            sx={{ '& input::-ms-reveal, & input::-webkit-credentials-auto-fill-button': { display: 'none' } }}
           />
           {secretError && (
             <Alert severity="error">{secretError}</Alert>
@@ -477,7 +473,7 @@ function PopupApp() {
             onClick={() => void handleFetchSecret()}
             disabled={!kcUsername || !kcPassword || fetchingSecret}
           >
-            {fetchingSecret ? 'Fetching...' : 'Fetch'}
+            {fetchingSecret ? <CircularProgress size={20} color="inherit" /> : 'Fetch'}
           </Button>
         </DialogActions>
       </Dialog>

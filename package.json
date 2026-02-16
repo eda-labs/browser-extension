@@ -4,9 +4,9 @@
   "private": true,
   "type": "module",
   "scripts": {
-    "build": "node build.mjs --firefox --chromium",
-    "build:firefox": "node build.mjs --firefox",
-    "build:chromium": "node build.mjs --chromium",
+    "build": "rm -rf dist && node build.mjs --firefox --chromium",
+    "build:firefox": "rm -rf dist && node build.mjs --firefox",
+    "build:chromium": "rm -rf dist && node build.mjs --chromium",
     "typecheck": "tsc --noEmit",
     "package": "npm run build && web-ext lint --source-dir dist/firefox && web-ext build --source-dir dist/firefox --overwrite-dest && web-ext build --source-dir dist/chromium --overwrite-dest",
     "package:firefox": "npm run build:firefox && web-ext lint --source-dir dist/firefox && web-ext sign --source-dir dist/firefox --channel unlisted",
