@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from 'react';
+import { useEffect, useState } from 'react';
 import { createRoot } from 'react-dom/client';
 import {
   ThemeProvider,
@@ -62,7 +62,7 @@ function PopupApp() {
   const selectedIsActive = selectedTargetId != null && selectedTargetId === activeTargetId;
   const locked = selectedIsActive && (status === 'connected' || status === 'connecting');
   const formFilled = editEdaUrl && editUsername && password && clientSecret;
-  console.log('[EDA] render:', { selectedTargetId, activeTargetId, status, selectedIsActive, locked });
+
 
   useEffect(() => {
     (async () => {
@@ -83,13 +83,10 @@ function PopupApp() {
     })();
 
     const onChange = (changes: Record<string, { oldValue?: unknown; newValue?: unknown }>) => {
-      console.log('[EDA] onChanged:', Object.keys(changes), JSON.stringify(changes));
       if (changes.connectionStatus) {
-        console.log('[EDA] onChanged setting status:', changes.connectionStatus.newValue);
         setStatus((changes.connectionStatus.newValue as ConnectionStatus) ?? 'disconnected');
       }
       if (changes.activeTargetId) {
-        console.log('[EDA] onChanged setting activeTargetId:', changes.activeTargetId.newValue);
         setActiveTargetId((changes.activeTargetId.newValue as string) ?? null);
       }
       if (changes.targets) {
@@ -176,13 +173,11 @@ function PopupApp() {
   async function handleConnect() {
     setError('');
     const target = await handleSaveTarget();
-    console.log('[EDA] handleConnect: saved target', target.id);
     setSelectedTargetId(target.id);
     setActiveTargetId(target.id);
     setStatus('connecting');
 
     try {
-      console.log('[EDA] handleConnect: sending eda-connect message...');
       const result = await api.runtime.sendMessage({
         type: 'eda-connect',
         targetId: target.id,
@@ -191,19 +186,14 @@ function PopupApp() {
         password,
         clientSecret: target.clientSecret,
       });
-      console.log('[EDA] handleConnect: got result', JSON.stringify(result));
-
       if (result && result.ok) {
-        console.log('[EDA] handleConnect: success, setting connected');
         setStatus('connected');
       } else {
-        console.log('[EDA] handleConnect: failed', result?.error);
         setStatus('error');
         setActiveTargetId(null);
         setError((result?.error as string) || 'Connection failed');
       }
     } catch (err) {
-      console.log('[EDA] handleConnect: exception', err);
       setStatus('error');
       setActiveTargetId(null);
       setError(err instanceof Error ? err.message : 'Connection failed');
