@@ -4,14 +4,14 @@
   "private": true,
   "type": "module",
   "scripts": {
-    "build": "node build.mjs",
+    "build": "node build.mjs --firefox --chromium",
+    "build:firefox": "node build.mjs --firefox",
     "build:chromium": "node build.mjs --chromium",
-    "lint": "web-ext lint --source-dir dist",
     "typecheck": "tsc --noEmit",
-    "package": "npm run build && npm run lint && web-ext build --source-dir dist --overwrite-dest",
-    "package:firefox": "npm run build && npm run lint && web-ext sign --source-dir dist --channel unlisted",
-    "package:chromium": "npm run build:chromium && web-ext build --source-dir dist --overwrite-dest",
-    "dev": "npm run build && web-ext run --source-dir dist",
+    "package": "npm run build && web-ext lint --source-dir dist/firefox && web-ext build --source-dir dist/firefox --overwrite-dest && web-ext build --source-dir dist/chromium --overwrite-dest",
+    "package:firefox": "npm run build:firefox && web-ext lint --source-dir dist/firefox && web-ext sign --source-dir dist/firefox --channel unlisted",
+    "package:chromium": "npm run build:chromium && web-ext build --source-dir dist/chromium --overwrite-dest",
+    "dev": "npm run build:firefox && web-ext run --source-dir dist/firefox",
     "clean": "rm -rf dist web-ext-artifacts"
   },
   "dependencies": {
