@@ -9,7 +9,7 @@
     "build:chromium": "rm -rf dist && node build.mjs --chromium",
     "typecheck": "tsc --noEmit",
     "package": "npm run build && web-ext lint --source-dir dist/firefox && web-ext build --source-dir dist/firefox --overwrite-dest && web-ext build --source-dir dist/chromium --overwrite-dest",
-    "package:firefox": "npm run build:firefox && web-ext lint --source-dir dist/firefox && web-ext sign --source-dir dist/firefox --channel unlisted",
+    "package:firefox": "npm run build:firefox && web-ext lint --source-dir dist/firefox && web-ext sign --source-dir dist/firefox --channel unlisted && mv web-ext-artifacts/*.xpi web-ext-artifacts/eda_browser_extension.xpi",
     "package:chromium": "npm run build:chromium && web-ext build --source-dir dist/chromium --overwrite-dest",
     "package:crx": "npm run build:chromium && crx3 -o web-ext-artifacts/eda_browser_extension.crx -p key.pem dist/chromium",
     "dev": "npm run build:firefox && web-ext run --source-dir dist/firefox",
