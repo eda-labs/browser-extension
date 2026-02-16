@@ -19,29 +19,6 @@ let state: EdaState = {
   activeTargetId: null,
 };
 
-async function getTargets(): Promise<TargetProfile[]> {
-  const stored = await api.storage.local.get(['targets']);
-  return (stored.targets as TargetProfile[] | undefined) ?? [];
-}
-
-async function saveTarget(target: TargetProfile): Promise<void> {
-  const targets = await getTargets();
-  const idx = targets.findIndex((t) => t.id === target.id);
-  if (idx >= 0) {
-    targets[idx] = target;
-  } else {
-    targets.push(target);
-  }
-  await api.storage.local.set({ targets });
-}
-
-async function deleteTarget(targetId: string): Promise<void> {
-  if (state.activeTargetId === targetId) {
-    disconnect();
-  }
-  const targets = await getTargets();
-  await api.storage.local.set({ targets: targets.filter((t) => t.id !== targetId) });
-}
 
 function decodeJwtExp(jwt: string): number {
   const parts = jwt.split('.');
@@ -120,7 +97,7 @@ async function connect(
   state.status = 'connecting';
   state.edaUrl = edaUrl;
   state.activeTargetId = targetId;
-  broadcastStatus();
+  persistStatus();
 
   try {
     state.clientSecret = clientSecret;
@@ -149,14 +126,14 @@ async function connect(
     });
 
     scheduleRefresh();
-    broadcastStatus();
+    persistStatus();
     return { ok: true };
   } catch (err) {
     state.status = 'error';
     state.accessToken = null;
     state.refreshToken = null;
     state.activeTargetId = null;
-    broadcastStatus();
+    persistStatus();
     return { ok: false, error: err instanceof Error ? err.message : String(err) };
   }
 }
@@ -209,8 +186,8 @@ function disconnect(): void {
     refreshTimerId: null,
     activeTargetId: null,
   };
-  void api.storage.local.remove(['edaUrl', 'clientSecret', 'accessToken', 'refreshToken', 'accessTokenExpiresAt', 'activeTargetId']);
-  broadcastStatus();
+  void api.storage.local.remove(['edaUrl', 'clientSecret', 'accessToken', 'refreshToken', 'accessTokenExpiresAt', 'activeTargetId', 'connectionStatus']);
+  persistStatus();
 }
 
 async function restoreSession(): Promise<void> {
@@ -236,6 +213,7 @@ async function restoreSession(): Promise<void> {
       state.status = 'connected';
     }
   }
+  persistStatus();
 }
 
 async function migrateStorage(): Promise<void> {
@@ -254,13 +232,11 @@ async function migrateStorage(): Promise<void> {
   }
 }
 
-function broadcastStatus(): void {
-  api.runtime.sendMessage({
-    type: 'eda-status-update',
-    status: state.status,
-    edaUrl: state.edaUrl,
+function persistStatus(): void {
+  void api.storage.local.set({
+    connectionStatus: state.status,
     activeTargetId: state.activeTargetId,
-  }).catch(() => {});
+  });
 }
 
 async function handleRequest(
@@ -307,32 +283,6 @@ api.runtime.onMessage.addListener((message, _sender, sendResponse) => {
     return false;
   }
 
-  if (message.type === 'eda-get-status') {
-    sendResponse({ status: state.status, edaUrl: state.edaUrl, activeTargetId: state.activeTargetId });
-    return false;
-  }
-
-  if (message.type === 'eda-get-targets') {
-    void getTargets().then((targets) => {
-      sendResponse({ targets, activeTargetId: state.activeTargetId });
-    });
-    return true;
-  }
-
-  if (message.type === 'eda-save-target') {
-    void saveTarget(message.target as TargetProfile).then(() => {
-      sendResponse({ ok: true });
-    });
-    return true;
-  }
-
-  if (message.type === 'eda-delete-target') {
-    void deleteTarget(message.targetId as string).then(() => {
-      sendResponse({ ok: true });
-    });
-    return true;
-  }
-
   if (message.type === 'eda-fetch-client-secret') {
     void fetchClientSecret(
       message.edaUrl as string,
@@ -353,15 +303,6 @@ api.runtime.onMessage.addListener((message, _sender, sendResponse) => {
       message.headers as Record<string, string> | undefined,
       message.body as string | undefined,
     ).then(sendResponse);
-    return true;
-  }
-
-  if (message.type === 'eda-get-config') {
-    void api.storage.local.get(['edaUrl']).then((stored) => {
-      sendResponse({
-        edaUrl: (stored.edaUrl as string) ?? '',
-      });
-    });
     return true;
   }
 

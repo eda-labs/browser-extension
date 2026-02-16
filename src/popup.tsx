@@ -84,15 +84,14 @@ function PopupApp() {
 
   useEffect(() => {
     (async () => {
-      const result = await api.runtime.sendMessage({ type: 'eda-get-targets' });
-      const loadedTargets = (result.targets as TargetProfile[]) ?? [];
-      const loadedActiveId = (result.activeTargetId as string | null) ?? null;
+      const stored = await api.storage.local.get(['targets', 'connectionStatus', 'activeTargetId']);
+      const loadedTargets = (stored.targets as TargetProfile[] | undefined) ?? [];
+      const loadedStatus = (stored.connectionStatus as ConnectionStatus | undefined) ?? 'disconnected';
+      const loadedActiveId = (stored.activeTargetId as string | undefined) ?? null;
 
       setTargets(loadedTargets);
+      setStatus(loadedStatus);
       setActiveTargetId(loadedActiveId);
-
-      const st = await api.runtime.sendMessage({ type: 'eda-get-status' });
-      setStatus(st.status as ConnectionStatus);
 
       if (loadedActiveId && loadedTargets.some((t) => t.id === loadedActiveId)) {
         selectTarget(loadedTargets, loadedActiveId);
@@ -100,6 +99,20 @@ function PopupApp() {
         selectTarget(loadedTargets, loadedTargets[0].id);
       }
     })();
+
+    const onChange = (changes: Record<string, { oldValue?: unknown; newValue?: unknown }>) => {
+      if (changes.connectionStatus) {
+        setStatus((changes.connectionStatus.newValue as ConnectionStatus) ?? 'disconnected');
+      }
+      if (changes.activeTargetId) {
+        setActiveTargetId((changes.activeTargetId.newValue as string) ?? null);
+      }
+      if (changes.targets) {
+        setTargets((changes.targets.newValue as TargetProfile[]) ?? []);
+      }
+    };
+    api.storage.onChanged.addListener(onChange);
+    return () => api.storage.onChanged.removeListener(onChange);
   }, []);
 
   function selectTarget(list: TargetProfile[], id: string) {
@@ -133,11 +146,17 @@ function PopupApp() {
       clientSecret,
     };
 
-    await api.runtime.sendMessage({ type: 'eda-save-target', target });
+    const stored = await api.storage.local.get(['targets']);
+    const existing = (stored.targets as TargetProfile[] | undefined) ?? [];
+    const idx = existing.findIndex((t) => t.id === id);
+    if (idx >= 0) {
+      existing[idx] = target;
+    } else {
+      existing.push(target);
+    }
+    await api.storage.local.set({ targets: existing });
 
-    const result = await api.runtime.sendMessage({ type: 'eda-get-targets' });
-    const updatedTargets = (result.targets as TargetProfile[]) ?? [];
-    setTargets(updatedTargets);
+    setTargets(existing);
     setSelectedTargetId(id);
     setIsNewTarget(false);
 
@@ -148,18 +167,16 @@ function PopupApp() {
     if (!selectedTargetId) return;
     setDeleteDialogOpen(false);
 
-    await api.runtime.sendMessage({ type: 'eda-delete-target', targetId: selectedTargetId });
-
-    const result = await api.runtime.sendMessage({ type: 'eda-get-targets' });
-    const updatedTargets = (result.targets as TargetProfile[]) ?? [];
-    const newActiveId = (result.activeTargetId as string | null) ?? null;
-    setTargets(updatedTargets);
-    setActiveTargetId(newActiveId);
-
     if (selectedTargetId === activeTargetId) {
-      setStatus('disconnected');
+      await api.runtime.sendMessage({ type: 'eda-disconnect' });
     }
 
+    const stored = await api.storage.local.get(['targets']);
+    const existing = (stored.targets as TargetProfile[] | undefined) ?? [];
+    const updatedTargets = existing.filter((t) => t.id !== selectedTargetId);
+    await api.storage.local.set({ targets: updatedTargets });
+
+    setTargets(updatedTargets);
     if (updatedTargets.length > 0) {
       selectTarget(updatedTargets, updatedTargets[0].id);
     } else {
@@ -171,7 +188,6 @@ function PopupApp() {
     setError('');
     const target = await handleSaveTarget();
 
-    setStatus('connecting');
     const result = await api.runtime.sendMessage({
       type: 'eda-connect',
       targetId: target.id,
@@ -181,20 +197,13 @@ function PopupApp() {
       clientSecret: target.clientSecret,
     });
 
-    if (result.ok) {
-      setStatus('connected');
-      setActiveTargetId(target.id);
-    } else {
-      setStatus('error');
-      setActiveTargetId(null);
+    if (!result.ok) {
       setError((result.error as string) || 'Connection failed');
     }
   }
 
   async function handleDisconnect() {
     await api.runtime.sendMessage({ type: 'eda-disconnect' });
-    setStatus('disconnected');
-    setActiveTargetId(null);
   }
 
   async function handleFetchSecret() {

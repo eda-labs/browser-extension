@@ -20,6 +20,20 @@ export interface BrowserAPI {
       set: (items: Record<string, unknown>) => Promise<void>;
       remove: (keys: string[]) => Promise<void>;
     };
+    onChanged: {
+      addListener: (
+        callback: (
+          changes: Record<string, { oldValue?: unknown; newValue?: unknown }>,
+          areaName: string,
+        ) => void,
+      ) => void;
+      removeListener: (
+        callback: (
+          changes: Record<string, { oldValue?: unknown; newValue?: unknown }>,
+          areaName: string,
+        ) => void,
+      ) => void;
+    };
   };
 }
 
