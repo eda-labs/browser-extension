@@ -327,6 +327,19 @@ function PopupApp() {
           />
         </Box>
 
+        {editEdaUrl && (
+          <Box sx={{ px: 2, pt: 0.5 }}>
+            <Button
+              variant="text"
+              size="small"
+              onClick={() => window.open('https://' + editEdaUrl, '_blank')}
+              sx={{ textTransform: 'none', fontSize: 12, p: 0 }}
+            >
+              Trust TLS Certificate
+            </Button>
+          </Box>
+        )}
+
         <Box sx={{ pt: 1.5 }} />
         <Divider />
         <Typography variant="subtitle2" sx={{ color: 'text.secondary', px: 2, py: 1 }}>

@@ -9,6 +9,15 @@ const theme = createTheme({
   typography: {
     fontFamily: '"NokiaPureText", "Roboto", sans-serif',
   },
+  components: {
+    MuiButton: {
+      styleOverrides: {
+        contained: ({ theme: t }) => ({
+          color: t.palette.text.primary,
+        }),
+      },
+    },
+  },
   palette: {
     mode: 'dark',
     primary: { main: '#6098FF' },
