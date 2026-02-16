@@ -127,6 +127,7 @@ async function connect(
     });
 
     scheduleRefresh();
+    startKeepalive();
     return { ok: true };
   } catch (err) {
     state.status = 'error';
@@ -177,8 +178,31 @@ function scheduleRefresh(): void {
   state.refreshTimerId = setTimeout(() => void refreshAccessToken(), delay);
 }
 
+const IDLE_TIMEOUT_MINUTES = 5;
+
+function startKeepalive(): void {
+  api.alarms.create('keepalive', { periodInMinutes: 0.4 });
+  resetIdleTimer();
+}
+
+function stopKeepalive(): void {
+  api.alarms.clear('keepalive');
+  api.alarms.clear('idle-disconnect');
+}
+
+function resetIdleTimer(): void {
+  api.alarms.create('idle-disconnect', { delayInMinutes: IDLE_TIMEOUT_MINUTES });
+}
+
+api.alarms.onAlarm.addListener((alarm) => {
+  if (alarm.name === 'idle-disconnect' && state.status === 'connected') {
+    disconnect();
+  }
+});
+
 function disconnect(): void {
   if (state.refreshTimerId) clearTimeout(state.refreshTimerId);
+  stopKeepalive();
   state = {
     status: 'disconnected',
     edaUrl: '',
@@ -216,6 +240,7 @@ async function restoreSession(): Promise<void> {
       state.status = 'connected';
     }
   }
+  if (state.status === 'connected') startKeepalive();
   persistStatus();
 }
 
@@ -269,6 +294,13 @@ async function handleRequest(
 }
 
 api.runtime.onMessage.addListener((message, _sender, sendResponse) => {
+  if (message.type === 'eda-get-status') {
+    void restorePromise.then(() => {
+      sendResponse({ status: state.status, edaUrl: state.edaUrl });
+    });
+    return true;
+  }
+
   if (message.type === 'eda-connect') {
     void connect(
       message.targetId as string,
@@ -302,6 +334,7 @@ api.runtime.onMessage.addListener((message, _sender, sendResponse) => {
   }
 
   if (message.type === 'eda-request') {
+    resetIdleTimer();
     void handleRequest(
       message.path as string,
       message.method as string | undefined,
@@ -314,4 +347,4 @@ api.runtime.onMessage.addListener((message, _sender, sendResponse) => {
   return false;
 });
 
-void migrateStorage().then(() => restoreSession());
+const restorePromise = migrateStorage().then(() => restoreSession());

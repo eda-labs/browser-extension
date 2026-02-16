@@ -14,6 +14,13 @@ export interface BrowserAPI {
       ) => void;
     };
   };
+  alarms: {
+    create: (name: string, info: { periodInMinutes: number }) => void;
+    clear: (name: string) => void;
+    onAlarm: {
+      addListener: (callback: (alarm: { name: string }) => void) => void;
+    };
+  };
   storage: {
     local: {
       get: (keys: string[]) => Promise<Record<string, unknown>>;
