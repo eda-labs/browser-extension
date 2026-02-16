@@ -1,7 +1,7 @@
-import { build, context } from 'esbuild';
-import { cpSync, rmSync, mkdirSync } from 'fs';
+import { build } from 'esbuild';
+import { cpSync, rmSync, mkdirSync, readFileSync, writeFileSync } from 'fs';
 
-const watch = process.argv.includes('--watch');
+const target = process.argv.includes('--chromium') ? 'chromium' : 'firefox';
 
 rmSync('dist', { recursive: true, force: true });
 mkdirSync('dist');
@@ -22,13 +22,12 @@ const popupOpts = {
 
 cpSync('static/', 'dist/', { recursive: true });
 
-if (watch) {
-  const bgCtx = await context(bgOpts);
-  const popupCtx = await context(popupOpts);
-  await bgCtx.watch();
-  await popupCtx.watch();
-  console.log('Watching for changes...');
-} else {
-  await build(bgOpts);
-  await build(popupOpts);
+if (target === 'chromium') {
+  const manifest = JSON.parse(readFileSync('dist/manifest.json', 'utf-8'));
+  manifest.background = { service_worker: 'background.js' };
+  delete manifest.browser_specific_settings;
+  writeFileSync('dist/manifest.json', JSON.stringify(manifest, null, 2) + '\n');
 }
+
+await build(bgOpts);
+await build(popupOpts);
