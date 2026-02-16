@@ -22,6 +22,8 @@ import {
   InputAdornment,
   IconButton,
   CircularProgress,
+  FormControlLabel,
+  Checkbox,
 } from '@mui/material';
 import theme from './theme';
 import { api } from './core/api';
@@ -59,6 +61,8 @@ function PopupApp() {
   const [kcPassword, setKcPassword] = useState('');
   const [fetchingSecret, setFetchingSecret] = useState(false);
   const [secretError, setSecretError] = useState('');
+  const [autoLogin, setAutoLogin] = useState(false);
+  const [autoLoginDialogOpen, setAutoLoginDialogOpen] = useState(false);
   const selectedIsActive = selectedTargetId != null && selectedTargetId === activeTargetId;
   const locked = selectedIsActive && (status === 'connected' || status === 'connecting');
   const formFilled = editEdaUrl && editUsername && password && clientSecret;
@@ -66,7 +70,7 @@ function PopupApp() {
 
   useEffect(() => {
     (async () => {
-      const stored = await api.storage.local.get(['targets', 'connectionStatus', 'activeTargetId']);
+      const stored = await api.storage.local.get(['targets', 'connectionStatus', 'activeTargetId', 'autoLogin']);
       const loadedTargets = (stored.targets as TargetProfile[] | undefined) ?? [];
       const loadedStatus = (stored.connectionStatus as ConnectionStatus | undefined) ?? 'disconnected';
       const loadedActiveId = (stored.activeTargetId as string | undefined) ?? null;
@@ -74,6 +78,7 @@ function PopupApp() {
       setTargets(loadedTargets);
       setStatus(loadedStatus);
       setActiveTargetId(loadedActiveId);
+      setAutoLogin(!!stored.autoLogin);
 
       if (loadedActiveId && loadedTargets.some((t) => t.id === loadedActiveId)) {
         selectTarget(loadedTargets, loadedActiveId);
@@ -104,8 +109,8 @@ function PopupApp() {
     setIsNewTarget(false);
     setEditEdaUrl(target.edaUrl.replace(/^https?:\/\//i, ''));
     setEditUsername(target.username);
+    setPassword(target.password);
     setClientSecret(target.clientSecret);
-    setPassword('');
     setError('');
   }
 
@@ -126,6 +131,7 @@ function PopupApp() {
       id,
       edaUrl,
       username: editUsername,
+      password,
       clientSecret,
     };
 
@@ -337,20 +343,29 @@ function PopupApp() {
               },
             }}
           />
+          <FormControlLabel
+            sx={{ pl: '2px'}}
+            control={
+              <Checkbox
+                size="small"
+                checked={autoLogin}
+                onChange={(e) => {
+                  if (e.target.checked) {
+                    setAutoLoginDialogOpen(true);
+                  } else {
+                    setAutoLogin(false);
+                    void api.storage.local.set({ autoLogin: false });
+                  }
+                }}
+              />
+            }
+            label={
+              <Typography variant="caption" sx={{ color: 'text.secondary' }}>
+                Auto-login to EDA UI (dangerous)
+              </Typography>
+            }
+          />
         </Box>
-
-        {editEdaUrl && (
-          <Box sx={{ px: 2, pt: 0.5 }}>
-            <Button
-              variant="text"
-              size="small"
-              onClick={() => window.open('https://' + editEdaUrl, '_blank')}
-              sx={{ textTransform: 'none', fontSize: 12, p: 0 }}
-            >
-              Trust TLS Certificate
-            </Button>
-          </Box>
-        )}
 
         <Box sx={{ pt: 1.5 }} />
         <Divider />
@@ -508,6 +523,32 @@ function PopupApp() {
             disabled={!kcUsername || !kcPassword || fetchingSecret}
           >
             {fetchingSecret ? <CircularProgress size={20} color="inherit" /> : 'Fetch'}
+          </Button>
+        </DialogActions>
+      </Dialog>
+      <Dialog open={autoLoginDialogOpen} onClose={() => setAutoLoginDialogOpen(false)} fullWidth maxWidth="xs">
+        <DialogTitle>Enable Auto-Login</DialogTitle>
+        <DialogContent>
+          <Typography variant="body2">
+            Enabling this feature is dangerous as attackers can extract credentials via spoofed EDA UIs.
+          </Typography>
+          <br/>
+          <Typography variant="body2">
+            <b><u>Think twice before enabling!</u></b>
+          </Typography>
+        </DialogContent>
+        <DialogActions>
+          <Button onClick={() => setAutoLoginDialogOpen(false)}>Cancel</Button>
+          <Button
+            variant="contained"
+            color="error"
+            onClick={() => {
+              setAutoLogin(true);
+              void api.storage.local.set({ autoLogin: true });
+              setAutoLoginDialogOpen(false);
+            }}
+          >
+            Enable
           </Button>
         </DialogActions>
       </Dialog>

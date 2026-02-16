@@ -17,6 +17,8 @@ let state: EdaState = {
   accessTokenExpiresAt: 0,
   refreshTimerId: null,
   activeTargetId: null,
+  username: null,
+  password: null,
 };
 
 
@@ -127,6 +129,8 @@ async function connect(
     });
 
     state.status = 'connected';
+    state.username = username;
+    state.password = password;
     state.accessToken = data.access_token;
     state.refreshToken = data.refresh_token;
     state.accessTokenExpiresAt = decodeJwtExp(data.access_token);
@@ -193,27 +197,15 @@ function scheduleRefresh(): void {
   state.refreshTimerId = setTimeout(() => void refreshAccessToken(), delay);
 }
 
-const IDLE_TIMEOUT_MINUTES = 5;
-
 function startKeepalive(): void {
   api.alarms.create('keepalive', { periodInMinutes: 0.4 });
-  resetIdleTimer();
 }
 
 function stopKeepalive(): void {
   api.alarms.clear('keepalive');
-  api.alarms.clear('idle-disconnect');
 }
 
-function resetIdleTimer(): void {
-  api.alarms.create('idle-disconnect', { delayInMinutes: IDLE_TIMEOUT_MINUTES });
-}
-
-api.alarms.onAlarm.addListener((alarm) => {
-  if (alarm.name === 'idle-disconnect' && state.status === 'connected') {
-    disconnect();
-  }
-});
+api.alarms.onAlarm.addListener(() => { /* wake up */ });
 
 function disconnect(): void {
   if (state.refreshTimerId) clearTimeout(state.refreshTimerId);
@@ -227,6 +219,8 @@ function disconnect(): void {
     accessTokenExpiresAt: 0,
     refreshTimerId: null,
     activeTargetId: null,
+    username: null,
+    password: null,
   };
   void api.storage.local.remove(['edaUrl', 'clientSecret', 'accessToken', 'refreshToken', 'accessTokenExpiresAt', 'activeTargetId', 'connectionStatus']);
   persistStatus();
@@ -245,6 +239,14 @@ async function restoreSession(): Promise<void> {
   state.refreshToken = stored.refreshToken;
   state.accessTokenExpiresAt = stored.accessTokenExpiresAt ?? 0;
   state.activeTargetId = stored.activeTargetId ?? null;
+
+  const targetStore = await api.storage.local.get(['targets']);
+  const targets = (targetStore.targets as TargetProfile[] | undefined) ?? [];
+  const activeTarget = targets.find((t) => t.id === state.activeTargetId);
+  if (activeTarget) {
+    state.username = activeTarget.username;
+    state.password = activeTarget.password;
+  }
 
   if (Date.now() < state.accessTokenExpiresAt) {
     state.status = 'connected';
@@ -266,6 +268,7 @@ async function migrateStorage(): Promise<void> {
       id: crypto.randomUUID(),
       edaUrl: stored.edaUrl as string,
       username: '',
+      password: '',
       clientSecret: '',
     };
     await api.storage.local.set({
@@ -316,6 +319,15 @@ api.runtime.onMessage.addListener((message, _sender, sendResponse) => {
     return true;
   }
 
+  if (message.type === 'eda-get-credentials') {
+    if (state.status === 'connected' && state.username && state.password) {
+      sendResponse({ ok: true, username: state.username, password: state.password });
+    } else {
+      sendResponse({ ok: false });
+    }
+    return false;
+  }
+
   if (message.type === 'eda-connect') {
     void connect(
       message.targetId as string,
@@ -349,7 +361,6 @@ api.runtime.onMessage.addListener((message, _sender, sendResponse) => {
   }
 
   if (message.type === 'eda-request') {
-    resetIdleTimer();
     void handleRequest(
       message.path as string,
       message.method as string | undefined,

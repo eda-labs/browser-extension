@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
   "name": "EDA Browser Extension",
-  "version": "1.4",
+  "version": "1.5",
   "description": "EDA stuff in the browser",
   "permissions": ["alarms", "storage"],
   "host_permissions": ["<all_urls>"],
@@ -10,7 +10,7 @@
   },
   "content_scripts": [
     {
-      "matches": ["https://*.eda.dev/*", "http://localhost/*", "http://127.0.0.1/*"],
+      "matches": ["<all_urls>"],
       "js": ["content.js"],
       "run_at": "document_start"
     }

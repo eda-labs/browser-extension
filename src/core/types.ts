@@ -4,6 +4,7 @@ export interface TargetProfile {
   id: string;
   edaUrl: string;
   username: string;
+  password: string;
   clientSecret: string;
 }
 
@@ -16,6 +17,8 @@ export interface EdaState {
   accessTokenExpiresAt: number;
   refreshTimerId: ReturnType<typeof setTimeout> | null;
   activeTargetId: string | null;
+  username: string | null;
+  password: string | null;
 }
 
 export interface StoredConfig {
