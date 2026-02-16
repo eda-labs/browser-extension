@@ -1,6 +1,6 @@
 # EDA Browser Extension
 
-[![][firefox-dl-badge]][firefox-latest-xpi] ![Get it for Chrome][chrome-latest-crx]
+[![][firefox-dl-badge]][firefox-latest-xpi] 
 
 A browser extension to let web pages interact with the Nokia EDA HTTP REST API.
 
