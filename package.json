@@ -4,11 +4,12 @@
   "private": true,
   "type": "module",
   "scripts": {
-    "build": "node build.mjs",
+    "build": "rm -rf dist && node build.mjs",
     "watch": "node build.mjs --watch",
     "lint": "web-ext lint --source-dir dist",
     "typecheck": "tsc --noEmit",
     "package": "npm run build && npm run lint && web-ext build --source-dir dist --overwrite-dest",
+    "package:firefox": "npm run build && npm run lint && web-ext sign --source-dir dist --channel unlisted",
     "dev": "npm run build && web-ext run --source-dir dist",
     "clean": "rm -rf dist web-ext-artifacts"
   },
