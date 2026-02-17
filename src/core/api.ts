@@ -7,12 +7,24 @@ export interface BrowserAPI {
       addListener: (
         callback: (
           message: Record<string, unknown>,
-          sender: unknown,
+          sender: {
+            tab?: {
+              id?: number;
+              url?: string;
+            };
+            url?: string;
+          },
           // eslint-disable-next-line @typescript-eslint/no-explicit-any
           sendResponse: (response: any) => void,
         ) => boolean | void,
       ) => void;
     };
+  };
+  tabs: {
+    sendMessage: (tabId: number, message: Record<string, unknown>) => Promise<Record<string, unknown>>;
+    create: (
+      createProperties: { url: string; active?: boolean },
+    ) => Promise<{ id?: number } | undefined>;
   };
   alarms: {
     create: (name: string, info: { periodInMinutes?: number; delayInMinutes?: number }) => void;

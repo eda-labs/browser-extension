@@ -21,6 +21,138 @@ let state: EdaState = {
   password: null,
 };
 
+const tabIdByOrigin = new Map<string, number>();
+const tabOpenedAtByOrigin = new Map<string, number>();
+const TRANSPORT_TAB_REOPEN_COOLDOWN_MS = 15000;
+
+function normalizeOrigin(url: string): string {
+  try {
+    return new URL(url).origin;
+  } catch {
+    return '';
+  }
+}
+
+function parseJson<T>(text: string, errorMessage: string): T {
+  try {
+    return JSON.parse(text) as T;
+  } catch {
+    throw new Error(errorMessage);
+  }
+}
+
+function asProxyResponse(value: unknown): ProxyResponse | null {
+  if (!value || typeof value !== 'object') return null;
+  const raw = value as Record<string, unknown>;
+  if (
+    typeof raw.ok !== 'boolean' ||
+    typeof raw.status !== 'number' ||
+    typeof raw.body !== 'string'
+  ) {
+    return null;
+  }
+  return {
+    ok: raw.ok,
+    status: raw.status,
+    body: raw.body,
+  };
+}
+
+async function doDirectFetch(
+  url: string,
+  method: string,
+  headers: Record<string, string> | undefined,
+  body: string | undefined,
+): Promise<ProxyResponse> {
+  const res = await fetch(url, {
+    method,
+    headers,
+    body,
+  });
+  return {
+    ok: res.ok,
+    status: res.status,
+    body: await res.text(),
+  };
+}
+
+async function doTabFetchFallback(
+  edaUrl: string,
+  url: string,
+  method: string,
+  headers: Record<string, string> | undefined,
+  body: string | undefined,
+): Promise<ProxyResponse | null> {
+  const origin = normalizeOrigin(edaUrl);
+  if (!origin) return null;
+
+  const tabId = tabIdByOrigin.get(origin);
+  if (tabId == null) return null;
+
+  try {
+    const rawResponse = await api.tabs.sendMessage(tabId, {
+      type: 'eda-tab-fetch',
+      url,
+      method,
+      headers,
+      body,
+    });
+    return asProxyResponse(rawResponse);
+  } catch {
+    return null;
+  }
+}
+
+async function doFetchWithTlsFallback(
+  edaUrl: string,
+  url: string,
+  method: string,
+  headers: Record<string, string> | undefined,
+  body: string | undefined,
+): Promise<ProxyResponse> {
+  try {
+    return await doDirectFetch(url, method, headers, body);
+  } catch {
+    const fallback = await doTabFetchFallback(edaUrl, url, method, headers, body);
+    if (fallback) return fallback;
+    throw new Error('TLS_CERT_ERROR');
+  }
+}
+
+function buildTlsBootstrapUrl(edaUrl: string): string {
+  return edaUrl.replace(/\/+$/, '') + '/';
+}
+
+async function ensureTransportTab(edaUrl: string): Promise<{ opened: boolean; pending?: boolean }> {
+  const origin = normalizeOrigin(edaUrl);
+  if (!origin) throw new Error('Invalid EDA URL');
+
+  const knownTabId = tabIdByOrigin.get(origin);
+  if (knownTabId != null) {
+    try {
+      const ping = await api.tabs.sendMessage(knownTabId, { type: 'eda-tab-ping' });
+      if (ping.ok === true) {
+        return { opened: false };
+      }
+    } catch {
+      const openedAt = tabOpenedAtByOrigin.get(origin) ?? 0;
+      if (Date.now() - openedAt < TRANSPORT_TAB_REOPEN_COOLDOWN_MS) {
+        return { opened: false, pending: true };
+      }
+      tabIdByOrigin.delete(origin);
+    }
+  }
+
+  const tab = await api.tabs.create({
+    url: buildTlsBootstrapUrl(edaUrl),
+    active: false,
+  });
+  if (typeof tab?.id === 'number') {
+    tabIdByOrigin.set(origin, tab.id);
+    tabOpenedAtByOrigin.set(origin, Date.now());
+  }
+  return { opened: true };
+}
 
 function decodeJwtExp(jwt: string): number {
   const parts = jwt.split('.');
@@ -32,21 +164,19 @@ function decodeJwtExp(jwt: string): number {
 async function fetchToken(edaUrl: string, realmPath: string, params: Record<string, string>): Promise<TokenResponse> {
   const url = edaUrl.replace(/\/+$/, '') +
     '/core/httpproxy/v1/keycloak/realms/' + realmPath + '/protocol/openid-connect/token';
-  let res: Response;
-  try {
-    res = await fetch(url, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
-      body: new URLSearchParams(params).toString(),
-    });
-  } catch {
-    throw new Error('TLS_CERT_ERROR');
+  const response = await doFetchWithTlsFallback(
+    edaUrl,
+    url,
+    'POST',
+    { 'Content-Type': 'application/x-www-form-urlencoded' },
+    new URLSearchParams(params).toString(),
+  );
+
+  if (!response.ok) {
+    throw new Error('Token request failed (' + response.status + '): ' + response.body);
   }
-  if (!res.ok) {
-    const text = await res.text();
-    throw new Error('Token request failed (' + res.status + '): ' + text);
-  }
-  return res.json() as Promise<TokenResponse>;
+
+  return parseJson<TokenResponse>(response.body, 'Invalid token response payload');
 }
 
 async function fetchKeycloakToken(edaUrl: string, username: string, password: string): Promise<string> {
@@ -64,39 +194,39 @@ async function fetchClientSecret(edaUrl: string, username: string, password: str
   const kcToken = await fetchKeycloakToken(edaUrl, username, password);
   const authHeader = { Authorization: 'Bearer ' + kcToken };
 
-  let clientsRes: Response;
-  try {
-    clientsRes = await fetch(
-      base + '/admin/realms/eda/clients?clientId=eda',
-      { headers: authHeader },
-    );
-  } catch {
-    throw new Error('TLS_CERT_ERROR');
+  const clientsResponse = await doFetchWithTlsFallback(
+    edaUrl,
+    base + '/admin/realms/eda/clients?clientId=eda',
+    'GET',
+    authHeader,
+    undefined,
+  );
+  if (!clientsResponse.ok) {
+    throw new Error('Failed to list Keycloak clients (' + clientsResponse.status + '): ' + clientsResponse.body);
   }
-  if (!clientsRes.ok) {
-    const text = await clientsRes.text();
-    throw new Error('Failed to list Keycloak clients (' + clientsRes.status + '): ' + text);
-  }
-  const clients = await clientsRes.json() as Array<{ id: string }>;
+  const clients = parseJson<Array<{ id: string }>>(
+    clientsResponse.body,
+    'Invalid Keycloak client list response',
+  );
   if (!clients.length) {
     throw new Error('Keycloak client "eda" not found – check privileges');
   }
   const clientUuid = clients[0].id;
 
-  let secretRes: Response;
-  try {
-    secretRes = await fetch(
-      base + '/admin/realms/eda/clients/' + clientUuid + '/client-secret',
-      { headers: authHeader },
-    );
-  } catch {
-    throw new Error('TLS_CERT_ERROR');
+  const secretResponse = await doFetchWithTlsFallback(
+    edaUrl,
+    base + '/admin/realms/eda/clients/' + clientUuid + '/client-secret',
+    'GET',
+    authHeader,
+    undefined,
+  );
+  if (!secretResponse.ok) {
+    throw new Error('Failed to fetch client secret (' + secretResponse.status + '): ' + secretResponse.body);
   }
-  if (!secretRes.ok) {
-    const text = await secretRes.text();
-    throw new Error('Failed to fetch client secret (' + secretRes.status + '): ' + text);
-  }
-  const secretData = await secretRes.json() as { value: string };
+  const secretData = parseJson<{ value: string }>(
+    secretResponse.body,
+    'Invalid Keycloak secret response',
+  );
   return secretData.value;
 }
 
@@ -197,8 +327,11 @@ function scheduleRefresh(): void {
   state.refreshTimerId = setTimeout(() => void refreshAccessToken(), delay);
 }
 
+// Chrome enforces minimum alarm periods; 1 minute is broadly supported across Chromium releases.
+const KEEPALIVE_ALARM_PERIOD_MINUTES = 1;
+
 function startKeepalive(): void {
-  api.alarms.create('keepalive', { periodInMinutes: 0.4 });
+  api.alarms.create('keepalive', { periodInMinutes: KEEPALIVE_ALARM_PERIOD_MINUTES });
 }
 
 function stopKeepalive(): void {
@@ -299,78 +432,102 @@ async function handleRequest(
   const reqHeaders = { ...headers, Authorization: 'Bearer ' + state.accessToken };
 
   try {
-    const res = await fetch(url, {
-      method: method ?? 'GET',
-      headers: reqHeaders,
-      body: body ?? undefined,
-    });
-    const text = await res.text();
-    return { ok: res.ok, status: res.status, body: text };
+    return await doDirectFetch(
+      url,
+      method ?? 'GET',
+      reqHeaders,
+      body ?? undefined,
+    );
   } catch (err) {
+    const fallback = await doTabFetchFallback(
+      state.edaUrl,
+      url,
+      method ?? 'GET',
+      reqHeaders,
+      body ?? undefined,
+    );
+    if (fallback) return fallback;
     return { ok: false, status: 0, body: err instanceof Error ? err.message : String(err) };
   }
 }
 
-api.runtime.onMessage.addListener((message, _sender, sendResponse) => {
-  if (message.type === 'eda-get-status') {
-    void restorePromise.then(() => {
-      sendResponse({ status: state.status, edaUrl: state.edaUrl });
-    });
-    return true;
-  }
-
-  if (message.type === 'eda-get-credentials') {
-    if (state.status === 'connected' && state.username && state.password) {
-      sendResponse({ ok: true, username: state.username, password: state.password });
-    } else {
-      sendResponse({ ok: false });
+api.runtime.onMessage.addListener((message, sender, sendResponse) => {
+  async function handleMessage(): Promise<unknown> {
+    if (message.type === 'eda-tab-ready') {
+      const origin = typeof message.origin === 'string' ? message.origin : '';
+      const tabId = sender.tab?.id;
+      if (origin && typeof tabId === 'number') {
+        tabIdByOrigin.set(origin, tabId);
+        tabOpenedAtByOrigin.set(origin, Date.now());
+      }
+      return { ok: true };
     }
-    return false;
+
+    if (message.type === 'eda-open-transport-tab') {
+      const edaUrl = typeof message.edaUrl === 'string' ? message.edaUrl : '';
+      if (!edaUrl) return { ok: false, error: 'Missing edaUrl' };
+      try {
+        return { ok: true, ...await ensureTransportTab(edaUrl) };
+      } catch (err) {
+        return { ok: false, error: err instanceof Error ? err.message : String(err) };
+      }
+    }
+
+    if (message.type === 'eda-get-status') {
+      return { status: state.status, edaUrl: state.edaUrl };
+    }
+
+    if (message.type === 'eda-get-credentials') {
+      if (state.status === 'connected' && state.username && state.password) {
+        return { ok: true, username: state.username, password: state.password };
+      }
+      return { ok: false };
+    }
+
+    if (message.type === 'eda-connect') {
+      return connect(
+        message.targetId as string,
+        message.edaUrl as string,
+        message.username as string,
+        message.password as string,
+        message.clientSecret as string,
+      );
+    }
+
+    if (message.type === 'eda-disconnect') {
+      disconnect();
+      return { ok: true };
+    }
+
+    if (message.type === 'eda-fetch-client-secret') {
+      try {
+        const secret = await fetchClientSecret(
+          message.edaUrl as string,
+          message.username as string,
+          message.password as string,
+        );
+        return { ok: true, clientSecret: secret };
+      } catch (err) {
+        return { ok: false, error: err instanceof Error ? err.message : String(err) };
+      }
+    }
+
+    if (message.type === 'eda-request') {
+      return handleRequest(
+        message.path as string,
+        message.method as string | undefined,
+        message.headers as Record<string, string> | undefined,
+        message.body as string | undefined,
+      );
+    }
+
+    return { ok: false, error: 'Unknown message type' };
   }
 
-  if (message.type === 'eda-connect') {
-    void connect(
-      message.targetId as string,
-      message.edaUrl as string,
-      message.username as string,
-      message.password as string,
-      message.clientSecret as string,
-    ).then(sendResponse).catch((err) => {
-      sendResponse({ ok: false, error: err instanceof Error ? err.message : String(err) });
-    });
-    return true;
-  }
-
-  if (message.type === 'eda-disconnect') {
-    disconnect();
-    sendResponse({ ok: true });
-    return false;
-  }
-
-  if (message.type === 'eda-fetch-client-secret') {
-    void fetchClientSecret(
-      message.edaUrl as string,
-      message.username as string,
-      message.password as string,
-    ).then((secret) => {
-      sendResponse({ ok: true, clientSecret: secret });
-    }).catch((err) => {
-      sendResponse({ ok: false, error: err instanceof Error ? err.message : String(err) });
-    });
-    return true;
-  }
-
-  if (message.type === 'eda-request') {
-    void handleRequest(
-      message.path as string,
-      message.method as string | undefined,
-      message.headers as Record<string, string> | undefined,
-      message.body as string | undefined,
-    ).then(sendResponse);
-    return true;
-  }
-
-  return false;
+  void restorePromise.then(() => handleMessage()).then(sendResponse).catch((err) => {
+    sendResponse({ ok: false, error: err instanceof Error ? err.message : String(err) });
+  });
+  return true;
 });
 
 const restorePromise = migrateStorage().then(() => restoreSession());

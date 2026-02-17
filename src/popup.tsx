@@ -44,6 +44,22 @@ const statusLabels: Record<ConnectionStatus, string> = {
   error: 'Error',
 };
 
+function getTargetHost(edaInput: string): string {
+  return edaInput.replace(/^https?:\/\//i, '').replace(/\/+$/, '').split('/')[0].split(':')[0];
+}
+
+function isIPv4Host(host: string): boolean {
+  return /^(\d{1,3}\.){3}\d{1,3}$/.test(host);
+}
+
+function buildTlsErrorHelp(edaInput: string): string {
+  const host = getTargetHost(edaInput);
+  const ipHint = isIPv4Host(host)
+    ? ' You are using an IP target; the certificate must include that IP in SAN, or use a hostname that matches the certificate.'
+    : '';
+  return 'TLS certificate not trusted by extension requests. Chrome cannot skip TLS checks. An EDA page may be opened in a background tab; complete certificate trust there, keep that tab open, then retry.' + ipHint;
+}
+
 function PopupApp() {
   const [status, setStatus] = useState<ConnectionStatus>('disconnected');
   const [error, setError] = useState('');
@@ -176,6 +192,19 @@ function PopupApp() {
     }
   }
 
+  async function openTransportTabInBackground(): Promise<void> {
+    if (!editEdaUrl) return;
+    const edaUrl = 'https://' + editEdaUrl.replace(/\/+$/, '');
+    try {
+      await api.runtime.sendMessage({
+        type: 'eda-open-transport-tab',
+        edaUrl,
+      });
+    } catch {
+      // Best effort only: keep popup usable even if tab creation fails.
+    }
+  }
+
   async function handleConnect() {
     setError('');
     const target = await handleSaveTarget();
@@ -199,8 +228,8 @@ function PopupApp() {
         setActiveTargetId(null);
         const err = (result?.error as string) || 'Connection failed';
         if (err === 'TLS_CERT_ERROR') {
-          setError('TLS certificate not trusted. Open the EDA URL in a tab and accept the certificate first.');
-          window.open('https://' + editEdaUrl, '_blank');
+          void openTransportTabInBackground();
+          setError(buildTlsErrorHelp(editEdaUrl));
         } else {
           setError(err);
         }
@@ -236,8 +265,8 @@ function PopupApp() {
     } else {
       const err = (result.error as string) || 'Failed to fetch client secret';
       if (err === 'TLS_CERT_ERROR') {
-        setSecretError('TLS certificate not trusted. Open the EDA URL in a tab and accept the certificate first.');
-        window.open('https://' + editEdaUrl, '_blank');
+        void openTransportTabInBackground();
+        setSecretError(buildTlsErrorHelp(editEdaUrl));
       } else {
         setSecretError(err);
       }
