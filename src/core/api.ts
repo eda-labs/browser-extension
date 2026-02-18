@@ -1,8 +1,24 @@
 // Minimal type declarations for the browser extension APIs we use.
 
+export interface Port {
+  name: string;
+  onDisconnect: {
+    addListener: (callback: () => void) => void;
+  };
+  onMessage: {
+    addListener: (callback: (message: Record<string, unknown>) => void) => void;
+  };
+  postMessage: (message: Record<string, unknown>) => void;
+  disconnect: () => void;
+}
+
 export interface BrowserAPI {
   runtime: {
+    connect: (connectInfo?: { name?: string }) => Port;
     sendMessage: (message: Record<string, unknown>) => Promise<Record<string, unknown>>;
+    onConnect: {
+      addListener: (callback: (port: Port) => void) => void;
+    };
     onMessage: {
       addListener: (
         callback: (
@@ -21,17 +37,11 @@ export interface BrowserAPI {
     };
   };
   tabs: {
+    query: (queryInfo: { url?: string }) => Promise<Array<{ id?: number; url?: string }>>;
     sendMessage: (tabId: number, message: Record<string, unknown>) => Promise<Record<string, unknown>>;
     create: (
       createProperties: { url: string; active?: boolean },
     ) => Promise<{ id?: number } | undefined>;
-  };
-  alarms: {
-    create: (name: string, info: { periodInMinutes?: number; delayInMinutes?: number }) => void;
-    clear: (name: string) => void;
-    onAlarm: {
-      addListener: (callback: (alarm: { name: string }) => void) => void;
-    };
   };
   storage: {
     local: {

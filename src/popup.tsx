@@ -79,6 +79,7 @@ function PopupApp() {
   const [secretError, setSecretError] = useState('');
   const [autoLogin, setAutoLogin] = useState(false);
   const [autoLoginDialogOpen, setAutoLoginDialogOpen] = useState(false);
+  const [tlsDialogOpen, setTlsDialogOpen] = useState(false);
   const selectedIsActive = selectedTargetId != null && selectedTargetId === activeTargetId;
   const locked = selectedIsActive && (status === 'connected' || status === 'connecting');
   const formFilled = editEdaUrl && editUsername && password && clientSecret;
@@ -229,7 +230,7 @@ function PopupApp() {
         const err = (result?.error as string) || 'Connection failed';
         if (err === 'TLS_CERT_ERROR') {
           void openTransportTabInBackground();
-          setError(buildTlsErrorHelp(editEdaUrl));
+          setTlsDialogOpen(true);
         } else {
           setError(err);
         }
@@ -266,7 +267,8 @@ function PopupApp() {
       const err = (result.error as string) || 'Failed to fetch client secret';
       if (err === 'TLS_CERT_ERROR') {
         void openTransportTabInBackground();
-        setSecretError(buildTlsErrorHelp(editEdaUrl));
+        setSecretDialogOpen(false);
+        setTlsDialogOpen(true);
       } else {
         setSecretError(err);
       }
@@ -555,6 +557,26 @@ function PopupApp() {
           </Button>
         </DialogActions>
       </Dialog>
+      <Dialog open={tlsDialogOpen} onClose={() => setTlsDialogOpen(false)} fullWidth maxWidth="xs">
+        <DialogTitle>TLS Certificate Error</DialogTitle>
+        <DialogContent sx={{ display: 'grid', gap: 1.5, pt: '8px !important' }}>
+          <Typography variant="body2">
+            The TLS certificate is not trusted by extension requests. Chrome cannot skip TLS checks.
+          </Typography>
+          <Typography variant="body2">
+            An EDA page has been opened in a background tab. Accept the certificate there, keep that tab open, then retry.
+          </Typography>
+          {isIPv4Host(getTargetHost(editEdaUrl)) && (
+            <Typography variant="body2" sx={{ color: 'text.secondary' }}>
+              You are using an IP target; the certificate must include that IP in SAN, or use a hostname that matches the certificate.
+            </Typography>
+          )}
+        </DialogContent>
+        <DialogActions>
+          <Button variant="contained" onClick={() => setTlsDialogOpen(false)}>OK</Button>
+        </DialogActions>
+      </Dialog>
+
       <Dialog open={autoLoginDialogOpen} onClose={() => setAutoLoginDialogOpen(false)} fullWidth maxWidth="xs">
         <DialogTitle>Enable Auto-Login</DialogTitle>
         <DialogContent>

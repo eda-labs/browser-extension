@@ -76,6 +76,29 @@ async function doDirectFetch(
   };
 }
 
+async function discoverTransportTab(origin: string): Promise<number | null> {
+  let tabs: Array<{ id?: number; url?: string }>;
+  try {
+    tabs = await api.tabs.query({ url: origin + '/*' });
+  } catch {
+    return null;
+  }
+
+  for (const tab of tabs) {
+    if (typeof tab.id !== 'number') continue;
+    try {
+      const ping = await api.tabs.sendMessage(tab.id, { type: 'eda-tab-ping' });
+      if (ping && ping.ok === true) {
+        tabIdByOrigin.set(origin, tab.id);
+        return tab.id;
+      }
+    } catch {
+      // content script not loaded in this tab, try next
+    }
+  }
+  return null;
+}
+
 async function doTabFetchFallback(
   edaUrl: string,
   url: string,
@@ -86,8 +109,12 @@ async function doTabFetchFallback(
   const origin = normalizeOrigin(edaUrl);
   if (!origin) return null;
 
-  const tabId = tabIdByOrigin.get(origin);
-  if (tabId == null) return null;
+  let tabId = tabIdByOrigin.get(origin);
+
+  if (tabId == null) {
+    tabId = (await discoverTransportTab(origin)) ?? undefined;
+    if (tabId == null) return null;
+  }
 
   try {
     const rawResponse = await api.tabs.sendMessage(tabId, {
@@ -99,7 +126,23 @@ async function doTabFetchFallback(
     });
     return asProxyResponse(rawResponse);
   } catch {
-    return null;
+    // Known tab failed — try to discover a different one
+    tabIdByOrigin.delete(origin);
+    const recoveredId = await discoverTransportTab(origin);
+    if (recoveredId == null) return null;
+
+    try {
+      const rawResponse = await api.tabs.sendMessage(recoveredId, {
+        type: 'eda-tab-fetch',
+        url,
+        method,
+        headers,
+        body,
+      });
+      return asProxyResponse(rawResponse);
+    } catch {
+      return null;
+    }
   }
 }
 
@@ -327,18 +370,29 @@ function scheduleRefresh(): void {
   state.refreshTimerId = setTimeout(() => void refreshAccessToken(), delay);
 }
 
-// Chrome enforces minimum alarm periods; 1 minute is broadly supported across Chromium releases.
-const KEEPALIVE_ALARM_PERIOD_MINUTES = 1;
+// Port-based keepalive: content scripts hold a persistent port open, which
+// prevents Chrome from terminating the MV3 service worker while connected.
+const keepalivePorts = new Set<import('./core/api').Port>();
+
+api.runtime.onConnect.addListener((port) => {
+  if (port.name !== 'eda-keepalive') return;
+  keepalivePorts.add(port);
+  port.onDisconnect.addListener(() => {
+    keepalivePorts.delete(port);
+  });
+});
 
 function startKeepalive(): void {
-  api.alarms.create('keepalive', { periodInMinutes: KEEPALIVE_ALARM_PERIOD_MINUTES });
+  // Keepalive is now driven by content script port connections — nothing to do here.
+  // The service worker stays alive as long as at least one port is open.
 }
 
 function stopKeepalive(): void {
-  api.alarms.clear('keepalive');
+  for (const port of keepalivePorts) {
+    port.disconnect();
+  }
+  keepalivePorts.clear();
 }
-
-api.alarms.onAlarm.addListener(() => { /* wake up */ });
 
 function disconnect(): void {
   if (state.refreshTimerId) clearTimeout(state.refreshTimerId);

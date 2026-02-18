@@ -2,8 +2,8 @@
   "manifest_version": 3,
   "name": "EDA Browser Extension",
   "version": "1.5",
-  "description": "EDA stuff in the browser",
-  "permissions": ["alarms", "storage"],
+  "description": "Enbale external webapps to consume the Nokia EDA API",
+  "permissions": ["storage"],
   "host_permissions": ["<all_urls>"],
   "background": {
     "scripts": ["background.js"]

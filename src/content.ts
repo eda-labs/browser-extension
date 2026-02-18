@@ -60,6 +60,14 @@ void api.runtime.sendMessage({
   origin: location.origin,
 }).catch(() => undefined);
 
+function connectKeepalive(): void {
+  const port = api.runtime.connect({ name: 'eda-keepalive' });
+  port.onDisconnect.addListener(() => {
+    setTimeout(connectKeepalive, 1000);
+  });
+}
+connectKeepalive();
+
 // Announce presence on load
 void postCurrentStatus();
 
