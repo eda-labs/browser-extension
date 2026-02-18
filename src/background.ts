@@ -2,11 +2,14 @@ import { api } from './core/api';
 import {
   type EdaState,
   type StoredConfig,
-  type TokenResponse,
   type ConnectResult,
   type ProxyResponse,
   type TargetProfile,
 } from './core/types';
+import { getErrorMessage } from './core/utils';
+import { tabIdByOrigin, tabOpenedAtByOrigin, doDirectFetch, doTabFetchFallback, ensureTransportTab } from './core/fetch';
+import { decodeJwtExp, fetchToken, fetchClientSecret } from './core/auth';
+import { initKeepalive, stopKeepalive } from './core/keepalive';
 
 let state: EdaState = {
   status: 'disconnected',
@@ -21,83 +24,61 @@ let state: EdaState = {
   password: null,
 };
 
+initKeepalive();
 
-function decodeJwtExp(jwt: string): number {
-  const parts = jwt.split('.');
-  if (parts.length !== 3) return 0;
-  const payload: { exp?: number } = JSON.parse(atob(parts[1].replace(/-/g, '+').replace(/_/g, '/')));
-  return (payload.exp ?? 0) * 1000;
-}
-
-async function fetchToken(edaUrl: string, realmPath: string, params: Record<string, string>): Promise<TokenResponse> {
-  const url = edaUrl.replace(/\/+$/, '') +
-    '/core/httpproxy/v1/keycloak/realms/' + realmPath + '/protocol/openid-connect/token';
-  let res: Response;
-  try {
-    res = await fetch(url, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
-      body: new URLSearchParams(params).toString(),
-    });
-  } catch {
-    throw new Error('TLS_CERT_ERROR');
-  }
-  if (!res.ok) {
-    const text = await res.text();
-    throw new Error('Token request failed (' + res.status + '): ' + text);
-  }
-  return res.json() as Promise<TokenResponse>;
-}
-
-async function fetchKeycloakToken(edaUrl: string, username: string, password: string): Promise<string> {
-  const data = await fetchToken(edaUrl, 'master', {
-    grant_type: 'password',
-    client_id: 'admin-cli',
-    username,
-    password,
+function persistStatus(): void {
+  void api.storage.local.set({
+    connectionStatus: state.status,
+    activeTargetId: state.activeTargetId,
   });
-  return data.access_token;
+  notifyTabs();
 }
 
-async function fetchClientSecret(edaUrl: string, username: string, password: string): Promise<string> {
-  const base = edaUrl.replace(/\/+$/, '') + '/core/httpproxy/v1/keycloak';
-  const kcToken = await fetchKeycloakToken(edaUrl, username, password);
-  const authHeader = { Authorization: 'Bearer ' + kcToken };
+function notifyTabs(): void {
+  const msg = {
+    type: 'eda-status-changed',
+    status: state.status,
+    edaUrl: state.edaUrl,
+  };
+  for (const tabId of tabIdByOrigin.values()) {
+    api.tabs.sendMessage(tabId, msg).catch(() => {});
+  }
+}
 
-  let clientsRes: Response;
-  try {
-    clientsRes = await fetch(
-      base + '/admin/realms/eda/clients?clientId=eda',
-      { headers: authHeader },
-    );
-  } catch {
-    throw new Error('TLS_CERT_ERROR');
-  }
-  if (!clientsRes.ok) {
-    const text = await clientsRes.text();
-    throw new Error('Failed to list Keycloak clients (' + clientsRes.status + '): ' + text);
-  }
-  const clients = await clientsRes.json() as Array<{ id: string }>;
-  if (!clients.length) {
-    throw new Error('Keycloak client "eda" not found – check privileges');
-  }
-  const clientUuid = clients[0].id;
+function scheduleRefresh(): void {
+  if (state.refreshTimerId) clearTimeout(state.refreshTimerId);
+  const delay = Math.max(0, state.accessTokenExpiresAt - Date.now() - 30000);
+  state.refreshTimerId = setTimeout(() => void refreshAccessToken(), delay);
+}
 
-  let secretRes: Response;
+async function refreshAccessToken(): Promise<void> {
+  if (!state.refreshToken || !state.clientSecret) {
+    disconnect();
+    return;
+  }
+
   try {
-    secretRes = await fetch(
-      base + '/admin/realms/eda/clients/' + clientUuid + '/client-secret',
-      { headers: authHeader },
-    );
+    const data = await fetchToken(state.edaUrl, 'eda', {
+      grant_type: 'refresh_token',
+      client_id: 'eda',
+      client_secret: state.clientSecret,
+      refresh_token: state.refreshToken,
+    });
+
+    state.accessToken = data.access_token;
+    state.refreshToken = data.refresh_token;
+    state.accessTokenExpiresAt = decodeJwtExp(data.access_token);
+
+    await api.storage.local.set({
+      accessToken: state.accessToken,
+      refreshToken: state.refreshToken,
+      accessTokenExpiresAt: state.accessTokenExpiresAt,
+    });
+
+    scheduleRefresh();
   } catch {
-    throw new Error('TLS_CERT_ERROR');
+    disconnect();
   }
-  if (!secretRes.ok) {
-    const text = await secretRes.text();
-    throw new Error('Failed to fetch client secret (' + secretRes.status + '): ' + text);
-  }
-  const secretData = await secretRes.json() as { value: string };
-  return secretData.value;
 }
 
 async function connect(
@@ -146,7 +127,7 @@ async function connect(
     });
 
     scheduleRefresh();
-    startKeepalive();
+
     return { ok: true };
   } catch (err) {
     state.status = 'error';
@@ -157,55 +138,9 @@ async function connect(
       connectionStatus: state.status,
       activeTargetId: state.activeTargetId,
     });
-    return { ok: false, error: err instanceof Error ? err.message : String(err) };
+    return { ok: false, error: getErrorMessage(err) };
   }
 }
-
-async function refreshAccessToken(): Promise<void> {
-  if (!state.refreshToken || !state.clientSecret) {
-    disconnect();
-    return;
-  }
-
-  try {
-    const data = await fetchToken(state.edaUrl, 'eda', {
-      grant_type: 'refresh_token',
-      client_id: 'eda',
-      client_secret: state.clientSecret,
-      refresh_token: state.refreshToken,
-    });
-
-    state.accessToken = data.access_token;
-    state.refreshToken = data.refresh_token;
-    state.accessTokenExpiresAt = decodeJwtExp(data.access_token);
-
-    await api.storage.local.set({
-      accessToken: state.accessToken,
-      refreshToken: state.refreshToken,
-      accessTokenExpiresAt: state.accessTokenExpiresAt,
-    });
-
-    scheduleRefresh();
-  } catch {
-    disconnect();
-  }
-}
-
-function scheduleRefresh(): void {
-  if (state.refreshTimerId) clearTimeout(state.refreshTimerId);
-  const delay = Math.max(0, state.accessTokenExpiresAt - Date.now() - 30000);
-  state.refreshTimerId = setTimeout(() => void refreshAccessToken(), delay);
-}
-
-function startKeepalive(): void {
-  api.alarms.create('keepalive', { periodInMinutes: 0.4 });
-}
-
-function stopKeepalive(): void {
-  api.alarms.clear('keepalive');
-}
-
-api.alarms.onAlarm.addListener(() => { /* wake up */ });
 
 function disconnect(): void {
   if (state.refreshTimerId) clearTimeout(state.refreshTimerId);
@@ -222,7 +157,7 @@ function disconnect(): void {
     username: null,
     password: null,
   };
-  void api.storage.local.remove(['edaUrl', 'clientSecret', 'accessToken', 'refreshToken', 'accessTokenExpiresAt', 'activeTargetId', 'connectionStatus']);
+  void api.storage.local.remove(['edaUrl', 'clientSecret', 'accessToken', 'refreshToken', 'accessTokenExpiresAt']);
   persistStatus();
 }
 
@@ -257,7 +192,6 @@ async function restoreSession(): Promise<void> {
       state.status = 'connected';
     }
   }
-  if (state.status === 'connected') startKeepalive();
   persistStatus();
 }
 
@@ -278,13 +212,6 @@ async function migrateStorage(): Promise<void> {
   }
 }
 
-function persistStatus(): void {
-  void api.storage.local.set({
-    connectionStatus: state.status,
-    activeTargetId: state.activeTargetId,
-  });
-}
-
 async function handleRequest(
   path: string,
   method: string | undefined,
@@ -299,78 +226,102 @@ async function handleRequest(
   const reqHeaders = { ...headers, Authorization: 'Bearer ' + state.accessToken };
 
   try {
-    const res = await fetch(url, {
-      method: method ?? 'GET',
-      headers: reqHeaders,
-      body: body ?? undefined,
-    });
-    const text = await res.text();
-    return { ok: res.ok, status: res.status, body: text };
+    return await doDirectFetch(
+      url,
+      method ?? 'GET',
+      reqHeaders,
+      body ?? undefined,
+    );
   } catch (err) {
-    return { ok: false, status: 0, body: err instanceof Error ? err.message : String(err) };
+    const fallback = await doTabFetchFallback(
+      state.edaUrl,
+      url,
+      method ?? 'GET',
+      reqHeaders,
+      body ?? undefined,
+    );
+    if (fallback) return fallback;
+    return { ok: false, status: 0, body: getErrorMessage(err) };
   }
 }
 
-api.runtime.onMessage.addListener((message, _sender, sendResponse) => {
-  if (message.type === 'eda-get-status') {
-    void restorePromise.then(() => {
-      sendResponse({ status: state.status, edaUrl: state.edaUrl });
-    });
-    return true;
-  }
-
-  if (message.type === 'eda-get-credentials') {
-    if (state.status === 'connected' && state.username && state.password) {
-      sendResponse({ ok: true, username: state.username, password: state.password });
-    } else {
-      sendResponse({ ok: false });
+api.runtime.onMessage.addListener((message, sender, sendResponse) => {
+  async function handleMessage(): Promise<unknown> {
+    if (message.type === 'eda-tab-ready') {
+      const origin = typeof message.origin === 'string' ? message.origin : '';
+      const tabId = sender.tab?.id;
+      if (origin && typeof tabId === 'number') {
+        tabIdByOrigin.set(origin, tabId);
+        tabOpenedAtByOrigin.set(origin, Date.now());
+      }
+      return { ok: true };
     }
-    return false;
+
+    if (message.type === 'eda-open-transport-tab') {
+      const edaUrl = typeof message.edaUrl === 'string' ? message.edaUrl : '';
+      if (!edaUrl) return { ok: false, error: 'Missing edaUrl' };
+      try {
+        return { ok: true, ...await ensureTransportTab(edaUrl) };
+      } catch (err) {
+        return { ok: false, error: getErrorMessage(err) };
+      }
+    }
+
+    if (message.type === 'eda-get-status') {
+      return { status: state.status, edaUrl: state.edaUrl };
+    }
+
+    if (message.type === 'eda-get-credentials') {
+      if (state.status === 'connected' && state.username && state.password) {
+        return { ok: true, username: state.username, password: state.password };
+      }
+      return { ok: false };
+    }
+
+    if (message.type === 'eda-connect') {
+      return connect(
+        message.targetId as string,
+        message.edaUrl as string,
+        message.username as string,
+        message.password as string,
+        message.clientSecret as string,
+      );
+    }
+
+    if (message.type === 'eda-disconnect') {
+      disconnect();
+      return { ok: true };
+    }
+
+    if (message.type === 'eda-fetch-client-secret') {
+      try {
+        const secret = await fetchClientSecret(
+          message.edaUrl as string,
+          message.username as string,
+          message.password as string,
+        );
+        return { ok: true, clientSecret: secret };
+      } catch (err) {
+        return { ok: false, error: getErrorMessage(err) };
+      }
+    }
+
+    if (message.type === 'eda-request') {
+      return handleRequest(
+        message.path as string,
+        message.method as string | undefined,
+        message.headers as Record<string, string> | undefined,
+        message.body as string | undefined,
+      );
+    }
+
+    return { ok: false, error: 'Unknown message type' };
   }
 
-  if (message.type === 'eda-connect') {
-    void connect(
-      message.targetId as string,
-      message.edaUrl as string,
-      message.username as string,
-      message.password as string,
-      message.clientSecret as string,
-    ).then(sendResponse).catch((err) => {
-      sendResponse({ ok: false, error: err instanceof Error ? err.message : String(err) });
-    });
-    return true;
-  }
-
-  if (message.type === 'eda-disconnect') {
-    disconnect();
-    sendResponse({ ok: true });
-    return false;
-  }
-
-  if (message.type === 'eda-fetch-client-secret') {
-    void fetchClientSecret(
-      message.edaUrl as string,
-      message.username as string,
-      message.password as string,
-    ).then((secret) => {
-      sendResponse({ ok: true, clientSecret: secret });
-    }).catch((err) => {
-      sendResponse({ ok: false, error: err instanceof Error ? err.message : String(err) });
-    });
-    return true;
-  }
-
-  if (message.type === 'eda-request') {
-    void handleRequest(
-      message.path as string,
-      message.method as string | undefined,
-      message.headers as Record<string, string> | undefined,
-      message.body as string | undefined,
-    ).then(sendResponse);
-    return true;
-  }
-
-  return false;
+  void restorePromise.then(() => handleMessage()).then(sendResponse).catch((err) => {
+    sendResponse({ ok: false, error: getErrorMessage(err) });
+  });
+  return true;
 });
 
 const restorePromise = migrateStorage().then(() => restoreSession());

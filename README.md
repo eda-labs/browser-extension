@@ -12,11 +12,18 @@ Simply click on the below badge to install/update:
 
 ### Chrome/Edge
 
-Head over to the [latest release](https://github.com/eda-labs/browser-extension/releases/latest/) and download `eda_browser_extension_x.y.zip`
+Chrome and Edge install this extension as an unpacked directory (not by double-clicking a `.zip`).
 
-Next navigate to [chrome://extensions](chrome://extensions), and simply drag and drop the `.zip` file onto the page to install.
+1. Download `eda_browser_extension-<version>.zip` from the [latest release](https://github.com/eda-labs/browser-extension/releases/latest/).
+2. Extract the zip to a folder.
+3. Open `chrome://extensions` (or `edge://extensions`).
+4. Enable `Developer mode`.
+5. Click `Load unpacked`.
+6. Select the extracted folder.
 
-## TLS Certifcates
+Optional: for environments that allow CRX sideloading, download `eda_browser_extension.crx` from the release and install it from the extensions page.
+
+## TLS Certificates
 
 If your EDA installation is using self-signed certs, or using a certificate not trusted by your browser. Please use the 'open EDA UI' icon to navigate to the EDA UI page and accept the safety warning from the browser and trust the certificate.
 
