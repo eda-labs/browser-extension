@@ -10,6 +10,16 @@ api.runtime.onMessage.addListener((message, _sender, sendResponse) => {
     return false;
   }
 
+  if (message.type === 'eda-status-changed') {
+    window.postMessage({
+      type: 'eda-status-changed',
+      status: message.status ?? 'disconnected',
+      edaUrl: message.edaUrl ?? '',
+    }, '*');
+    sendResponse({ ok: true });
+    return false;
+  }
+
   if (message.type !== 'eda-tab-fetch') return false;
 
   const url = message.url;

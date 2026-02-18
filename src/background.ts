@@ -31,6 +31,18 @@ function persistStatus(): void {
     connectionStatus: state.status,
     activeTargetId: state.activeTargetId,
   });
+  notifyTabs();
+}
+
+function notifyTabs(): void {
+  const msg = {
+    type: 'eda-status-changed',
+    status: state.status,
+    edaUrl: state.edaUrl,
+  };
+  for (const tabId of tabIdByOrigin.values()) {
+    api.tabs.sendMessage(tabId, msg).catch(() => {});
+  }
 }
 
 function scheduleRefresh(): void {
@@ -145,7 +157,7 @@ function disconnect(): void {
     username: null,
     password: null,
   };
-  void api.storage.local.remove(['edaUrl', 'clientSecret', 'accessToken', 'refreshToken', 'accessTokenExpiresAt', 'activeTargetId', 'connectionStatus']);
+  void api.storage.local.remove(['edaUrl', 'clientSecret', 'accessToken', 'refreshToken', 'accessTokenExpiresAt']);
   persistStatus();
 }
 
