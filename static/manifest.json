@@ -2,15 +2,23 @@
   "manifest_version": 3,
   "name": "EDA Browser Extension",
   "version": "1.6",
-  "description": "Enbale external webapps to consume the Nokia EDA API",
+  "description": "Allow external web apps to consume the Nokia EDA REST API. Not an official Nokia product.",
   "permissions": ["storage"],
-  "host_permissions": ["<all_urls>"],
+  "host_permissions": [
+    "https://eda.dev/*",
+    "https://*.eda.dev/*",
+    "https://*/core/httpproxy/v1/keycloak/realms/eda/protocol/openid-connect/*"
+  ],
   "background": {
     "scripts": ["background.js"]
   },
   "content_scripts": [
     {
-      "matches": ["<all_urls>"],
+      "matches": [
+        "https://eda.dev/*",
+        "https://*.eda.dev/*",
+        "https://*/core/httpproxy/v1/keycloak/realms/eda/protocol/openid-connect/*"
+      ],
       "js": ["content.js"],
       "run_at": "document_start"
     }
