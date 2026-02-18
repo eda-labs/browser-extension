@@ -1,64 +1,19 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { createRoot } from 'react-dom/client';
-import {
-  ThemeProvider,
-  CssBaseline,
-  Box,
-  TextField,
-  Button,
-  Typography,
-  Alert,
-  Divider,
-  Select,
-  MenuItem,
-  FormControl,
-  InputLabel,
-  Dialog,
-  DialogTitle,
-  DialogContent,
-  DialogActions,
-  Chip,
-  LinearProgress,
-  InputAdornment,
-  IconButton,
-  CircularProgress,
-  FormControlLabel,
-  Checkbox,
-} from '@mui/material';
+import { ThemeProvider, CssBaseline, Box, Divider } from '@mui/material';
 import theme from './theme';
 import { api } from './core/api';
 import { type ConnectionStatus, type TargetProfile } from './core/types';
-import OpenInNewIcon from '@mui/icons-material/OpenInNew';
-
-const statusColors: Record<ConnectionStatus, string> = {
-  disconnected: '#8994a3',
-  connecting: '#FFAC0A',
-  connected: '#00A87E',
-  error: '#FF6363',
-};
-
-const statusLabels: Record<ConnectionStatus, string> = {
-  disconnected: 'Disconnected',
-  connecting: 'Connecting...',
-  connected: 'Connected',
-  error: 'Error',
-};
-
-function getTargetHost(edaInput: string): string {
-  return edaInput.replace(/^https?:\/\//i, '').replace(/\/+$/, '').split('/')[0].split(':')[0];
-}
-
-function isIPv4Host(host: string): boolean {
-  return /^(\d{1,3}\.){3}\d{1,3}$/.test(host);
-}
-
-function buildTlsErrorHelp(edaInput: string): string {
-  const host = getTargetHost(edaInput);
-  const ipHint = isIPv4Host(host)
-    ? ' You are using an IP target; the certificate must include that IP in SAN, or use a hostname that matches the certificate.'
-    : '';
-  return 'TLS certificate not trusted by extension requests. Chrome cannot skip TLS checks. An EDA page may be opened in a background tab; complete certificate trust there, keep that tab open, then retry.' + ipHint;
-}
+import { PopupHeader } from './components/PopupHeader';
+import { TargetSelector } from './components/TargetSelector';
+import { EdaUrlField } from './components/EdaUrlField';
+import { CredentialsSection } from './components/CredentialsSection';
+import { ClientSecretSection } from './components/ClientSecretSection';
+import { ActionButtons } from './components/ActionButtons';
+import { TlsErrorDialog } from './components/TlsErrorDialog';
+import { SecretDialog } from './components/SecretDialog';
+import { DeleteDialog } from './components/DeleteDialog';
+import { AutoLoginDialog } from './components/AutoLoginDialog';
 
 function PopupApp() {
   const [status, setStatus] = useState<ConnectionStatus>('disconnected');
@@ -73,17 +28,13 @@ function PopupApp() {
   const [clientSecret, setClientSecret] = useState('');
   const [deleteDialogOpen, setDeleteDialogOpen] = useState(false);
   const [secretDialogOpen, setSecretDialogOpen] = useState(false);
-  const [kcUsername, setKcUsername] = useState('');
-  const [kcPassword, setKcPassword] = useState('');
-  const [fetchingSecret, setFetchingSecret] = useState(false);
-  const [secretError, setSecretError] = useState('');
   const [autoLogin, setAutoLogin] = useState(false);
   const [autoLoginDialogOpen, setAutoLoginDialogOpen] = useState(false);
   const [tlsDialogOpen, setTlsDialogOpen] = useState(false);
+  const loaded = useRef(false);
   const selectedIsActive = selectedTargetId != null && selectedTargetId === activeTargetId;
   const locked = selectedIsActive && (status === 'connected' || status === 'connecting');
   const formFilled = editEdaUrl && editUsername && password && clientSecret;
-
 
   useEffect(() => {
     (async () => {
@@ -97,11 +48,21 @@ function PopupApp() {
       setActiveTargetId(loadedActiveId);
       setAutoLogin(!!stored.autoLogin);
 
-      if (loadedActiveId && loadedTargets.some((t) => t.id === loadedActiveId)) {
+      const draft = localStorage.getItem('draft');
+      if (draft) {
+        const d = JSON.parse(draft) as Record<string, string | boolean | null>;
+        setSelectedTargetId((d.selectedTargetId as string | null) ?? null);
+        setIsNewTarget(!!d.isNewTarget);
+        setEditEdaUrl((d.edaUrl as string) ?? '');
+        setEditUsername((d.username as string) ?? '');
+        setPassword((d.password as string) ?? '');
+        setClientSecret((d.clientSecret as string) ?? '');
+      } else if (loadedActiveId && loadedTargets.some((t) => t.id === loadedActiveId)) {
         selectTarget(loadedTargets, loadedActiveId);
       } else if (loadedTargets.length > 0) {
         selectTarget(loadedTargets, loadedTargets[0].id);
       }
+      loaded.current = true;
     })();
 
     const onChange = (changes: Record<string, { oldValue?: unknown; newValue?: unknown }>) => {
@@ -118,6 +79,14 @@ function PopupApp() {
     api.storage.onChanged.addListener(onChange);
     return () => api.storage.onChanged.removeListener(onChange);
   }, []);
+
+  useEffect(() => {
+    if (!loaded.current) return;
+    localStorage.setItem('draft', JSON.stringify({
+      selectedTargetId, isNewTarget, edaUrl: editEdaUrl,
+      username: editUsername, password, clientSecret,
+    }));
+  }, [selectedTargetId, isNewTarget, editEdaUrl, editUsername, password, clientSecret]);
 
   function selectTarget(list: TargetProfile[], id: string) {
     const target = list.find((t) => t.id === id);
@@ -144,13 +113,7 @@ function PopupApp() {
   async function handleSaveTarget(): Promise<TargetProfile> {
     const edaUrl = 'https://' + editEdaUrl.replace(/\/+$/, '');
     const id = edaUrl;
-    const target: TargetProfile = {
-      id,
-      edaUrl,
-      username: editUsername,
-      password,
-      clientSecret,
-    };
+    const target: TargetProfile = { id, edaUrl, username: editUsername, password, clientSecret };
 
     const stored = await api.storage.local.get(['targets']);
     const existing = (stored.targets as TargetProfile[] | undefined) ?? [];
@@ -168,7 +131,6 @@ function PopupApp() {
     setTargets(existing);
     setSelectedTargetId(id);
     setIsNewTarget(false);
-
     return target;
   }
 
@@ -197,12 +159,9 @@ function PopupApp() {
     if (!editEdaUrl) return;
     const edaUrl = 'https://' + editEdaUrl.replace(/\/+$/, '');
     try {
-      await api.runtime.sendMessage({
-        type: 'eda-open-transport-tab',
-        edaUrl,
-      });
+      await api.runtime.sendMessage({ type: 'eda-open-transport-tab', edaUrl });
     } catch {
-      // Best effort only: keep popup usable even if tab creation fails.
+      // Best effort only
     }
   }
 
@@ -248,361 +207,97 @@ function PopupApp() {
     setActiveTargetId(null);
   }
 
-  async function handleFetchSecret() {
-    setFetchingSecret(true);
-    setSecretError('');
-    const result = await api.runtime.sendMessage({
-      type: 'eda-fetch-client-secret',
-      edaUrl: 'https://' + editEdaUrl.replace(/\/+$/, ''),
-      username: kcUsername,
-      password: kcPassword,
-    });
-    setFetchingSecret(false);
-    if (result.ok) {
-      setClientSecret(result.clientSecret as string);
-      setSecretDialogOpen(false);
-      setKcUsername('');
-      setKcPassword('');
-    } else {
-      const err = (result.error as string) || 'Failed to fetch client secret';
-      if (err === 'TLS_CERT_ERROR') {
-        void openTransportTabInBackground();
-        setSecretDialogOpen(false);
-        setTlsDialogOpen(true);
-      } else {
-        setSecretError(err);
-      }
-    }
-  }
-
   return (
     <ThemeProvider theme={theme}>
       <CssBaseline />
       <Box sx={{ width: 340, bgcolor: 'background.default', display: 'grid', gridTemplateColumns: '1fr' }}>
-        {status === 'connecting' && <LinearProgress sx={{ height: 3 }} />}
-        <Box sx={{ px: 2, pt: 2, pb: 1.5, display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
-          <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
-            <a href="https://eda.dev" target="_blank" rel="noopener noreferrer" style={{ display: 'flex' }}>
-              <img src="icons/icon-128.png" width={16} height={16} alt="" />
-            </a>
-            <Typography variant="h6" sx={{ fontSize: 15, fontWeight: 600 }}>
-              EDA Connection
-            </Typography>
-          </Box>
-          <Chip
-            size="small"
-            label={statusLabels[status]}
-            sx={{
-              bgcolor: statusColors[status] + '22',
-              color: statusColors[status],
-              fontWeight: 600,
-              fontSize: 11,
-              height: 24,
-              '& .MuiChip-label': { px: 1 },
-            }}
-          />
-        </Box>
-
-        <Divider />
-
-        <Box sx={{ px: 2, pt: 1.5, display: 'grid', gap: 1.5 }}>
-          <Box sx={{ display: 'flex', gap: 1, alignItems: 'flex-end' }}>
-            <FormControl size="small" sx={{ flex: 1 }}>
-              <InputLabel shrink>Target</InputLabel>
-              <Select
-                label="Target"
-                value={isNewTarget ? '' : (selectedTargetId ?? '')}
-                onChange={(e) => {
-                  const id = e.target.value as string;
-                  if (id) selectTarget(targets, id);
-                }}
-                displayEmpty
-                notched
-                renderValue={(val) => {
-                  if (!val) return <Typography sx={{ color: 'text.secondary', fontSize: 'inherit' }}>Select a target...</Typography>;
-                  const t = targets.find((t) => t.id === val);
-                  return t ? t.edaUrl : '';
-                }}
-              >
-                {targets.map((t) => (
-                  <MenuItem key={t.id} value={t.id}>
-                    {t.edaUrl}
-                    {t.id === activeTargetId && status === 'connected' ? ' (active)' : ''}
-                  </MenuItem>
-                ))}
-              </Select>
-            </FormControl>
-            <Button
-              variant="contained"
-              onClick={handleNewTarget}
-              title="New target"
-              sx={{ minWidth: 0, px: 2, fontSize: 20, height: 40 }}
-            >
-              +
-            </Button>
-          </Box>
-        </Box>
-
-        <Box sx={{ px: 2, pt: 1.5, display: 'grid', gap: 1.5 }}>
-          <TextField
-            label="EDA URL"
-            placeholder="eda.example.com"
-            fullWidth
-            value={editEdaUrl}
-            onChange={(e) => setEditEdaUrl(e.target.value.replace(/^https?:\/\//i, ''))}
-            disabled={locked}
-            size="small"
-            slotProps={{
-              input: {
-                startAdornment: (
-                  <InputAdornment position="start" sx={{ mr: 0 }}>
-                    <Typography sx={{ color: 'text.secondary', fontSize: 'inherit', whiteSpace: 'nowrap' }}>https://&nbsp;</Typography>
-                  </InputAdornment>
-                ),
-                endAdornment: editEdaUrl ? (
-                  <InputAdornment position="end">
-                    <IconButton
-                      size="small"
-                      edge="end"
-                      onClick={() => window.open('https://' + editEdaUrl, '_blank')}
-                      title="Open in new tab"
-                    >
-                      <OpenInNewIcon fontSize="small" />
-                    </IconButton>
-                  </InputAdornment>
-                ) : null,
-              },
-            }}
-          />
-          <FormControlLabel
-            sx={{ pl: '2px'}}
-            control={
-              <Checkbox
-                size="small"
-                checked={autoLogin}
-                onChange={(e) => {
-                  if (e.target.checked) {
-                    setAutoLoginDialogOpen(true);
-                  } else {
-                    setAutoLogin(false);
-                    void api.storage.local.set({ autoLogin: false });
-                  }
-                }}
-              />
+        <PopupHeader status={status} />
+        <TargetSelector
+          targets={targets}
+          selectedTargetId={selectedTargetId}
+          activeTargetId={activeTargetId}
+          status={status}
+          isNewTarget={isNewTarget}
+          onSelect={(id) => selectTarget(targets, id)}
+          onNewTarget={handleNewTarget}
+        />
+        <EdaUrlField
+          value={editEdaUrl}
+          onChange={setEditEdaUrl}
+          disabled={locked}
+          autoLogin={autoLogin}
+          onAutoLoginChange={(checked) => {
+            if (checked) {
+              setAutoLoginDialogOpen(true);
+            } else {
+              setAutoLogin(false);
+              void api.storage.local.set({ autoLogin: false });
             }
-            label={
-              <Typography variant="caption" sx={{ color: 'text.secondary' }}>
-                Auto-login to EDA UI (dangerous)
-              </Typography>
-            }
-          />
-        </Box>
-
-        <Box sx={{ pt: 1.5 }} />
+          }}
+        />
+        <CredentialsSection
+          username={editUsername}
+          password={password}
+          onUsernameChange={setEditUsername}
+          onPasswordChange={setPassword}
+          disabled={locked}
+          locked={locked}
+        />
+        <ClientSecretSection
+          clientSecret={clientSecret}
+          onClientSecretChange={setClientSecret}
+          disabled={locked}
+          locked={locked}
+          edaUrl={editEdaUrl}
+          onFetchClick={() => { setSecretDialogOpen(true); }}
+        />
         <Divider />
-        <Typography variant="subtitle2" sx={{ color: 'text.secondary', px: 2, py: 1 }}>
-          EDA User
-        </Typography>
-        <Divider />
-        <Box sx={{ px: 2, pt: 1.5, pb: 0.5, display: 'grid', gap: 1.5 }}>
-          <TextField
-            label="Username"
-            placeholder="EDA Username"
-            fullWidth
-            value={editUsername}
-            onChange={(e) => setEditUsername(e.target.value)}
-            disabled={locked}
-            size="small"
-          />
-          <TextField
-            label="Password"
-            type="password"
-            placeholder="EDA User Password"
-            fullWidth
-            value={locked ? '' : password}
-            onChange={(e) => setPassword(e.target.value)}
-            disabled={locked}
-            size="small"
-            sx={{ '& input::-ms-reveal, & input::-webkit-credentials-auto-fill-button': { display: 'none' } }}
-          />
-        </Box>
-
-        <Box sx={{ pt: 1.5 }} />
-        <Divider />
-        <Typography variant="subtitle2" sx={{ color: 'text.secondary', px: 2, py: 1 }}>
-          Client Secret
-        </Typography>
-        <Divider />
-        <Box sx={{ px: 2, pt: 1.5, pb: 0.5, display: 'grid', gap: 1.5 }}>
-          <TextField
-            label="Client Secret"
-            type="password"
-            placeholder="Paste or fetch below"
-            fullWidth
-            value={locked ? '' : clientSecret}
-            onChange={(e) => setClientSecret(e.target.value)}
-            disabled={locked}
-            size="small"
-            sx={{ '& input::-ms-reveal, & input::-webkit-credentials-auto-fill-button': { display: 'none' } }}
-          />
-          <Button
-            variant="outlined"
-            size="small"
-            onClick={() => { setSecretError(''); setSecretDialogOpen(true); }}
-            disabled={locked || !editEdaUrl}
-          >
-            Fetch
-          </Button>
-        </Box>
-
-        <Box sx={{ pt: 1.5 }} />
-        <Divider />
-        <Box sx={{ px: 2, pt: 1.5, pb: 2, display: 'grid', gap: 1.5 }}>
-          {error && (
-            <Alert severity="error">{error}</Alert>
-          )}
-
-          <Box sx={{ display: 'grid', gridTemplateColumns: 'auto auto 1fr auto', gap: 1 }}>
-            {!locked && (
-              <Button variant="outlined" onClick={() => void handleSaveTarget()} disabled={!editEdaUrl} size="small">
-                Save
-              </Button>
-            )}
-            {selectedTargetId && !isNewTarget && !locked ? (
-              <Button
-                variant="outlined"
-                color="error"
-                onClick={() => setDeleteDialogOpen(true)}
-                size="small"
-              >
-                Delete
-              </Button>
-            ) : !locked ? <span /> : null}
-            {!locked ? <span /> : <span style={{ gridColumn: '1 / -1' }} />}
-            {locked ? (
-              <Button
-                variant="contained"
-                color="error"
-                onClick={() => void handleDisconnect()}
-                size="small"
-                sx={{ gridColumn: '-2 / -1' }}
-              >
-                Disconnect
-              </Button>
-            ) : (
-              <Button
-                variant="contained"
-                onClick={() => void handleConnect()}
-                disabled={!formFilled || status === 'connecting'}
-                size="small"
-              >
-                Connect
-              </Button>
-            )}
-          </Box>
-        </Box>
+        <ActionButtons
+          error={error}
+          locked={locked}
+          canSave={!!editEdaUrl}
+          canDelete={!!selectedTargetId && !isNewTarget}
+          canConnect={!!formFilled}
+          connecting={status === 'connecting'}
+          onSave={() => void handleSaveTarget()}
+          onDelete={() => setDeleteDialogOpen(true)}
+          onConnect={() => void handleConnect()}
+          onDisconnect={() => void handleDisconnect()}
+        />
       </Box>
 
-      <Dialog open={deleteDialogOpen} onClose={() => setDeleteDialogOpen(false)}>
-        <DialogTitle>Delete Target</DialogTitle>
-        <DialogContent>
-          <Typography>
-            Delete &quot;{editEdaUrl}&quot;? This cannot be undone.
-          </Typography>
-        </DialogContent>
-        <DialogActions>
-          <Button onClick={() => setDeleteDialogOpen(false)}>Cancel</Button>
-          <Button color="error" onClick={() => void handleDeleteTarget()}>Delete</Button>
-        </DialogActions>
-      </Dialog>
-
-      <Dialog open={secretDialogOpen} onClose={() => setSecretDialogOpen(false)} fullWidth maxWidth="xs">
-        <DialogTitle>Get Client Secret</DialogTitle>
-        <DialogContent sx={{ display: 'grid', gap: 1.5, pt: '8px !important' }}>
-          <Typography variant="body2" sx={{ color: 'text.secondary' }}>
-            Enter Keycloak credentials to fetch the client secret.
-          </Typography>
-          <TextField
-            label="Username"
-            placeholder="username"
-            fullWidth
-            value={kcUsername}
-            onChange={(e) => setKcUsername(e.target.value)}
-            disabled={fetchingSecret}
-            size="small"
-          />
-          <TextField
-            label="Password"
-            type="password"
-            placeholder="password"
-            fullWidth
-            value={kcPassword}
-            onChange={(e) => setKcPassword(e.target.value)}
-            disabled={fetchingSecret}
-            size="small"
-            sx={{ '& input::-ms-reveal, & input::-webkit-credentials-auto-fill-button': { display: 'none' } }}
-          />
-          {secretError && (
-            <Alert severity="error">{secretError}</Alert>
-          )}
-        </DialogContent>
-        <DialogActions>
-          <Button onClick={() => setSecretDialogOpen(false)} disabled={fetchingSecret}>Cancel</Button>
-          <Button
-            variant="contained"
-            onClick={() => void handleFetchSecret()}
-            disabled={!kcUsername || !kcPassword || fetchingSecret}
-          >
-            {fetchingSecret ? <CircularProgress size={20} color="inherit" /> : 'Fetch'}
-          </Button>
-        </DialogActions>
-      </Dialog>
-      <Dialog open={tlsDialogOpen} onClose={() => setTlsDialogOpen(false)} fullWidth maxWidth="xs">
-        <DialogTitle>TLS Certificate Error</DialogTitle>
-        <DialogContent sx={{ display: 'grid', gap: 1.5, pt: '8px !important' }}>
-          <Typography variant="body2">
-            The TLS certificate is not trusted by extension requests. Chrome cannot skip TLS checks.
-          </Typography>
-          <Typography variant="body2">
-            An EDA page has been opened in a background tab. Accept the certificate there, keep that tab open, then retry.
-          </Typography>
-          {isIPv4Host(getTargetHost(editEdaUrl)) && (
-            <Typography variant="body2" sx={{ color: 'text.secondary' }}>
-              You are using an IP target; the certificate must include that IP in SAN, or use a hostname that matches the certificate.
-            </Typography>
-          )}
-        </DialogContent>
-        <DialogActions>
-          <Button variant="contained" onClick={() => setTlsDialogOpen(false)}>OK</Button>
-        </DialogActions>
-      </Dialog>
-
-      <Dialog open={autoLoginDialogOpen} onClose={() => setAutoLoginDialogOpen(false)} fullWidth maxWidth="xs">
-        <DialogTitle>Enable Auto-Login</DialogTitle>
-        <DialogContent>
-          <Typography variant="body2">
-            Enabling this feature is dangerous as attackers can extract credentials via spoofed EDA UIs.
-          </Typography>
-          <br/>
-          <Typography variant="body2">
-            <b><u>Think twice before enabling!</u></b>
-          </Typography>
-        </DialogContent>
-        <DialogActions>
-          <Button onClick={() => setAutoLoginDialogOpen(false)}>Cancel</Button>
-          <Button
-            variant="contained"
-            color="error"
-            onClick={() => {
-              setAutoLogin(true);
-              void api.storage.local.set({ autoLogin: true });
-              setAutoLoginDialogOpen(false);
-            }}
-          >
-            Enable
-          </Button>
-        </DialogActions>
-      </Dialog>
+      <DeleteDialog
+        open={deleteDialogOpen}
+        onClose={() => setDeleteDialogOpen(false)}
+        onConfirm={() => void handleDeleteTarget()}
+        targetName={editEdaUrl}
+      />
+      <SecretDialog
+        open={secretDialogOpen}
+        onClose={() => setSecretDialogOpen(false)}
+        edaUrl={'https://' + editEdaUrl.replace(/\/+$/, '')}
+        onSecretFetched={(secret) => {
+          setClientSecret(secret);
+          setSecretDialogOpen(false);
+        }}
+        onTlsError={() => {
+          void openTransportTabInBackground();
+          setTlsDialogOpen(true);
+        }}
+      />
+      <TlsErrorDialog
+        open={tlsDialogOpen}
+        onClose={() => setTlsDialogOpen(false)}
+      />
+      <AutoLoginDialog
+        open={autoLoginDialogOpen}
+        onClose={() => setAutoLoginDialogOpen(false)}
+        onConfirm={() => {
+          setAutoLogin(true);
+          void api.storage.local.set({ autoLogin: true });
+          setAutoLoginDialogOpen(false);
+        }}
+      />
     </ThemeProvider>
   );
 }

@@ -1,4 +1,5 @@
 import { api } from './core/api';
+import { getErrorMessage } from './core/utils';
 import { postCurrentStatus, handlePageMessage, handleStorageChange } from './core/handlers';
 
 window.addEventListener('message', (event: MessageEvent) => void handlePageMessage(event));
@@ -48,7 +49,7 @@ api.runtime.onMessage.addListener((message, _sender, sendResponse) => {
     sendResponse({
       ok: false,
       status: 0,
-      body: err instanceof Error ? err.message : String(err),
+      body: getErrorMessage(err),
     });
   });
 

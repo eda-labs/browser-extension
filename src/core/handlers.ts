@@ -1,4 +1,5 @@
 import { api } from './api';
+import { getErrorMessage } from './utils';
 
 export async function postCurrentStatus(): Promise<void> {
   try {
@@ -39,7 +40,7 @@ export async function handlePageMessage(event: MessageEvent): Promise<void> {
         id,
         ok: false,
         status: 0,
-        body: err instanceof Error ? err.message : String(err),
+        body: getErrorMessage(err),
       }, '*');
     }
   }

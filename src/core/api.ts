@@ -12,7 +12,7 @@ export interface Port {
   disconnect: () => void;
 }
 
-export interface BrowserAPI {
+interface BrowserAPI {
   runtime: {
     connect: (connectInfo?: { name?: string }) => Port;
     sendMessage: (message: Record<string, unknown>) => Promise<Record<string, unknown>>;

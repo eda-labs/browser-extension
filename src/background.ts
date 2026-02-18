@@ -2,11 +2,14 @@ import { api } from './core/api';
 import {
   type EdaState,
   type StoredConfig,
-  type TokenResponse,
   type ConnectResult,
   type ProxyResponse,
   type TargetProfile,
 } from './core/types';
+import { getErrorMessage } from './core/utils';
+import { tabIdByOrigin, tabOpenedAtByOrigin, doDirectFetch, doTabFetchFallback, ensureTransportTab } from './core/fetch';
+import { decodeJwtExp, fetchToken, fetchClientSecret } from './core/auth';
+import { initKeepalive, stopKeepalive } from './core/keepalive';
 
 let state: EdaState = {
   status: 'disconnected',
@@ -21,256 +24,49 @@ let state: EdaState = {
   password: null,
 };
 
-const tabIdByOrigin = new Map<string, number>();
-const tabOpenedAtByOrigin = new Map<string, number>();
-const TRANSPORT_TAB_REOPEN_COOLDOWN_MS = 15000;
+initKeepalive();
 
-function normalizeOrigin(url: string): string {
-  try {
-    return new URL(url).origin;
-  } catch {
-    return '';
-  }
-}
-
-function parseJson<T>(text: string, errorMessage: string): T {
-  try {
-    return JSON.parse(text) as T;
-  } catch {
-    throw new Error(errorMessage);
-  }
-}
-
-function asProxyResponse(value: unknown): ProxyResponse | null {
-  if (!value || typeof value !== 'object') return null;
-  const raw = value as Record<string, unknown>;
-  if (
-    typeof raw.ok !== 'boolean' ||
-    typeof raw.status !== 'number' ||
-    typeof raw.body !== 'string'
-  ) {
-    return null;
-  }
-  return {
-    ok: raw.ok,
-    status: raw.status,
-    body: raw.body,
-  };
-}
-
-async function doDirectFetch(
-  url: string,
-  method: string,
-  headers: Record<string, string> | undefined,
-  body: string | undefined,
-): Promise<ProxyResponse> {
-  const res = await fetch(url, {
-    method,
-    headers,
-    body,
+function persistStatus(): void {
+  void api.storage.local.set({
+    connectionStatus: state.status,
+    activeTargetId: state.activeTargetId,
   });
-  return {
-    ok: res.ok,
-    status: res.status,
-    body: await res.text(),
-  };
 }
 
-async function discoverTransportTab(origin: string): Promise<number | null> {
-  let tabs: Array<{ id?: number; url?: string }>;
-  try {
-    tabs = await api.tabs.query({ url: origin + '/*' });
-  } catch {
-    return null;
-  }
-
-  for (const tab of tabs) {
-    if (typeof tab.id !== 'number') continue;
-    try {
-      const ping = await api.tabs.sendMessage(tab.id, { type: 'eda-tab-ping' });
-      if (ping && ping.ok === true) {
-        tabIdByOrigin.set(origin, tab.id);
-        return tab.id;
-      }
-    } catch {
-      // content script not loaded in this tab, try next
-    }
-  }
-  return null;
+function scheduleRefresh(): void {
+  if (state.refreshTimerId) clearTimeout(state.refreshTimerId);
+  const delay = Math.max(0, state.accessTokenExpiresAt - Date.now() - 30000);
+  state.refreshTimerId = setTimeout(() => void refreshAccessToken(), delay);
 }
 
-async function doTabFetchFallback(
-  edaUrl: string,
-  url: string,
-  method: string,
-  headers: Record<string, string> | undefined,
-  body: string | undefined,
-): Promise<ProxyResponse | null> {
-  const origin = normalizeOrigin(edaUrl);
-  if (!origin) return null;
-
-  let tabId = tabIdByOrigin.get(origin);
-
-  if (tabId == null) {
-    tabId = (await discoverTransportTab(origin)) ?? undefined;
-    if (tabId == null) return null;
+async function refreshAccessToken(): Promise<void> {
+  if (!state.refreshToken || !state.clientSecret) {
+    disconnect();
+    return;
   }
 
   try {
-    const rawResponse = await api.tabs.sendMessage(tabId, {
-      type: 'eda-tab-fetch',
-      url,
-      method,
-      headers,
-      body,
+    const data = await fetchToken(state.edaUrl, 'eda', {
+      grant_type: 'refresh_token',
+      client_id: 'eda',
+      client_secret: state.clientSecret,
+      refresh_token: state.refreshToken,
     });
-    return asProxyResponse(rawResponse);
+
+    state.accessToken = data.access_token;
+    state.refreshToken = data.refresh_token;
+    state.accessTokenExpiresAt = decodeJwtExp(data.access_token);
+
+    await api.storage.local.set({
+      accessToken: state.accessToken,
+      refreshToken: state.refreshToken,
+      accessTokenExpiresAt: state.accessTokenExpiresAt,
+    });
+
+    scheduleRefresh();
   } catch {
-    // Known tab failed — try to discover a different one
-    tabIdByOrigin.delete(origin);
-    const recoveredId = await discoverTransportTab(origin);
-    if (recoveredId == null) return null;
-
-    try {
-      const rawResponse = await api.tabs.sendMessage(recoveredId, {
-        type: 'eda-tab-fetch',
-        url,
-        method,
-        headers,
-        body,
-      });
-      return asProxyResponse(rawResponse);
-    } catch {
-      return null;
-    }
+    disconnect();
   }
-}
-
-async function doFetchWithTlsFallback(
-  edaUrl: string,
-  url: string,
-  method: string,
-  headers: Record<string, string> | undefined,
-  body: string | undefined,
-): Promise<ProxyResponse> {
-  try {
-    return await doDirectFetch(url, method, headers, body);
-  } catch {
-    const fallback = await doTabFetchFallback(edaUrl, url, method, headers, body);
-    if (fallback) return fallback;
-    throw new Error('TLS_CERT_ERROR');
-  }
-}
-
-function buildTlsBootstrapUrl(edaUrl: string): string {
-  return edaUrl.replace(/\/+$/, '') + '/';
-}
-
-async function ensureTransportTab(edaUrl: string): Promise<{ opened: boolean; pending?: boolean }> {
-  const origin = normalizeOrigin(edaUrl);
-  if (!origin) throw new Error('Invalid EDA URL');
-
-  const knownTabId = tabIdByOrigin.get(origin);
-  if (knownTabId != null) {
-    try {
-      const ping = await api.tabs.sendMessage(knownTabId, { type: 'eda-tab-ping' });
-      if (ping.ok === true) {
-        return { opened: false };
-      }
-    } catch {
-      const openedAt = tabOpenedAtByOrigin.get(origin) ?? 0;
-      if (Date.now() - openedAt < TRANSPORT_TAB_REOPEN_COOLDOWN_MS) {
-        return { opened: false, pending: true };
-      }
-      tabIdByOrigin.delete(origin);
-    }
-  }
-
-  const tab = await api.tabs.create({
-    url: buildTlsBootstrapUrl(edaUrl),
-    active: false,
-  });
-  if (typeof tab?.id === 'number') {
-    tabIdByOrigin.set(origin, tab.id);
-    tabOpenedAtByOrigin.set(origin, Date.now());
-  }
-  return { opened: true };
-}
-
-function decodeJwtExp(jwt: string): number {
-  const parts = jwt.split('.');
-  if (parts.length !== 3) return 0;
-  const payload: { exp?: number } = JSON.parse(atob(parts[1].replace(/-/g, '+').replace(/_/g, '/')));
-  return (payload.exp ?? 0) * 1000;
-}
-
-async function fetchToken(edaUrl: string, realmPath: string, params: Record<string, string>): Promise<TokenResponse> {
-  const url = edaUrl.replace(/\/+$/, '') +
-    '/core/httpproxy/v1/keycloak/realms/' + realmPath + '/protocol/openid-connect/token';
-  const response = await doFetchWithTlsFallback(
-    edaUrl,
-    url,
-    'POST',
-    { 'Content-Type': 'application/x-www-form-urlencoded' },
-    new URLSearchParams(params).toString(),
-  );
-
-  if (!response.ok) {
-    throw new Error('Token request failed (' + response.status + '): ' + response.body);
-  }
-
-  return parseJson<TokenResponse>(response.body, 'Invalid token response payload');
-}
-
-async function fetchKeycloakToken(edaUrl: string, username: string, password: string): Promise<string> {
-  const data = await fetchToken(edaUrl, 'master', {
-    grant_type: 'password',
-    client_id: 'admin-cli',
-    username,
-    password,
-  });
-  return data.access_token;
-}
-
-async function fetchClientSecret(edaUrl: string, username: string, password: string): Promise<string> {
-  const base = edaUrl.replace(/\/+$/, '') + '/core/httpproxy/v1/keycloak';
-  const kcToken = await fetchKeycloakToken(edaUrl, username, password);
-  const authHeader = { Authorization: 'Bearer ' + kcToken };
-
-  const clientsResponse = await doFetchWithTlsFallback(
-    edaUrl,
-    base + '/admin/realms/eda/clients?clientId=eda',
-    'GET',
-    authHeader,
-    undefined,
-  );
-  if (!clientsResponse.ok) {
-    throw new Error('Failed to list Keycloak clients (' + clientsResponse.status + '): ' + clientsResponse.body);
-  }
-  const clients = parseJson<Array<{ id: string }>>(
-    clientsResponse.body,
-    'Invalid Keycloak client list response',
-  );
-  if (!clients.length) {
-    throw new Error('Keycloak client "eda" not found – check privileges');
-  }
-  const clientUuid = clients[0].id;
-
-  const secretResponse = await doFetchWithTlsFallback(
-    edaUrl,
-    base + '/admin/realms/eda/clients/' + clientUuid + '/client-secret',
-    'GET',
-    authHeader,
-    undefined,
-  );
-  if (!secretResponse.ok) {
-    throw new Error('Failed to fetch client secret (' + secretResponse.status + '): ' + secretResponse.body);
-  }
-  const secretData = parseJson<{ value: string }>(
-    secretResponse.body,
-    'Invalid Keycloak secret response',
-  );
-  return secretData.value;
 }
 
 async function connect(
@@ -319,7 +115,7 @@ async function connect(
     });
 
     scheduleRefresh();
-    startKeepalive();
+
     return { ok: true };
   } catch (err) {
     state.status = 'error';
@@ -330,68 +126,8 @@ async function connect(
       connectionStatus: state.status,
       activeTargetId: state.activeTargetId,
     });
-    return { ok: false, error: err instanceof Error ? err.message : String(err) };
+    return { ok: false, error: getErrorMessage(err) };
   }
-}
-
-async function refreshAccessToken(): Promise<void> {
-  if (!state.refreshToken || !state.clientSecret) {
-    disconnect();
-    return;
-  }
-
-  try {
-    const data = await fetchToken(state.edaUrl, 'eda', {
-      grant_type: 'refresh_token',
-      client_id: 'eda',
-      client_secret: state.clientSecret,
-      refresh_token: state.refreshToken,
-    });
-
-    state.accessToken = data.access_token;
-    state.refreshToken = data.refresh_token;
-    state.accessTokenExpiresAt = decodeJwtExp(data.access_token);
-
-    await api.storage.local.set({
-      accessToken: state.accessToken,
-      refreshToken: state.refreshToken,
-      accessTokenExpiresAt: state.accessTokenExpiresAt,
-    });
-
-    scheduleRefresh();
-  } catch {
-    disconnect();
-  }
-}
-
-function scheduleRefresh(): void {
-  if (state.refreshTimerId) clearTimeout(state.refreshTimerId);
-  const delay = Math.max(0, state.accessTokenExpiresAt - Date.now() - 30000);
-  state.refreshTimerId = setTimeout(() => void refreshAccessToken(), delay);
-}
-
-// Port-based keepalive: content scripts hold a persistent port open, which
-// prevents Chrome from terminating the MV3 service worker while connected.
-const keepalivePorts = new Set<import('./core/api').Port>();
-
-api.runtime.onConnect.addListener((port) => {
-  if (port.name !== 'eda-keepalive') return;
-  keepalivePorts.add(port);
-  port.onDisconnect.addListener(() => {
-    keepalivePorts.delete(port);
-  });
-});
-
-function startKeepalive(): void {
-  // Keepalive is now driven by content script port connections — nothing to do here.
-  // The service worker stays alive as long as at least one port is open.
-}
-
-function stopKeepalive(): void {
-  for (const port of keepalivePorts) {
-    port.disconnect();
-  }
-  keepalivePorts.clear();
 }
 
 function disconnect(): void {
@@ -444,7 +180,6 @@ async function restoreSession(): Promise<void> {
       state.status = 'connected';
     }
   }
-  if (state.status === 'connected') startKeepalive();
   persistStatus();
 }
 
@@ -463,13 +198,6 @@ async function migrateStorage(): Promise<void> {
       activeTargetId: target.id,
     });
   }
-}
-
-function persistStatus(): void {
-  void api.storage.local.set({
-    connectionStatus: state.status,
-    activeTargetId: state.activeTargetId,
-  });
 }
 
 async function handleRequest(
@@ -501,7 +229,7 @@ async function handleRequest(
       body ?? undefined,
     );
     if (fallback) return fallback;
-    return { ok: false, status: 0, body: err instanceof Error ? err.message : String(err) };
+    return { ok: false, status: 0, body: getErrorMessage(err) };
   }
 }
 
@@ -523,7 +251,7 @@ api.runtime.onMessage.addListener((message, sender, sendResponse) => {
       try {
         return { ok: true, ...await ensureTransportTab(edaUrl) };
       } catch (err) {
-        return { ok: false, error: err instanceof Error ? err.message : String(err) };
+        return { ok: false, error: getErrorMessage(err) };
       }
     }
 
@@ -562,7 +290,7 @@ api.runtime.onMessage.addListener((message, sender, sendResponse) => {
         );
         return { ok: true, clientSecret: secret };
       } catch (err) {
-        return { ok: false, error: err instanceof Error ? err.message : String(err) };
+        return { ok: false, error: getErrorMessage(err) };
       }
     }
 
@@ -579,7 +307,7 @@ api.runtime.onMessage.addListener((message, sender, sendResponse) => {
   }
 
   void restorePromise.then(() => handleMessage()).then(sendResponse).catch((err) => {
-    sendResponse({ ok: false, error: err instanceof Error ? err.message : String(err) });
+    sendResponse({ ok: false, error: getErrorMessage(err) });
   });
   return true;
 });
