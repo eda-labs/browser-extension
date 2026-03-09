@@ -1,15 +1,15 @@
 import { api } from './core/api';
 import { getErrorMessage } from './core/utils';
 import { postCurrentStatus, handlePageMessage, handleStorageChange } from './core/handlers';
-import { injectSpotlightInterceptor, initSpotlight } from './spotlight';
 
-// Inject the XHR interceptor immediately at document_start
-// (before any page scripts run) to capture the auth token
-injectSpotlightInterceptor();
+const PAGE_TARGET_ORIGIN = window.location.origin === 'null' ? '*' : window.location.origin;
+let spotlightInitialized = false;
+let keepaliveConnected = false;
 
 function isEdaSite(): boolean {
   const desc = document.querySelector('meta[name="description"]');
-  return desc?.getAttribute('content') === 'EDA';
+  if (desc?.getAttribute('content') === 'EDA') return true;
+  return location.pathname.startsWith('/ui/');
 }
 
 window.addEventListener('message', (event: MessageEvent) => void handlePageMessage(event));
@@ -25,7 +25,7 @@ api.runtime.onMessage.addListener((message, _sender, sendResponse) => {
       type: 'eda-status-changed',
       status: message.status ?? 'disconnected',
       edaUrl: message.edaUrl ?? '',
-    }, '*');
+    }, PAGE_TARGET_ORIGIN);
     sendResponse({ ok: true });
     return false;
   }
@@ -87,7 +87,12 @@ function connectKeepalive(): void {
     setTimeout(connectKeepalive, 1000);
   });
 }
-connectKeepalive();
+
+function ensureKeepalive(): void {
+  if (keepaliveConnected) return;
+  keepaliveConnected = true;
+  connectKeepalive();
+}
 
 // Announce presence on load
 void postCurrentStatus();
@@ -117,9 +122,17 @@ async function tryAutoLogin(): Promise<void> {
 }
 
 function initEdaFeatures(): void {
-  if (!isEdaSite()) return;
   void tryAutoLogin();
-  initSpotlight();
+  if (!isEdaSite()) return;
+  ensureKeepalive();
+  if (spotlightInitialized) return;
+  spotlightInitialized = true;
+  void import('./spotlight').then(({ injectSpotlightInterceptor, initSpotlight }) => {
+    injectSpotlightInterceptor();
+    initSpotlight();
+  }).catch(() => {
+    spotlightInitialized = false;
+  });
 }
 
 if (document.readyState === 'loading') {

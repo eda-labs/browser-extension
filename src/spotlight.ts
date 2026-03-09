@@ -9,6 +9,8 @@ const EQL_REQUEST_MSG = 'eda-ext-eql-request';
 const EQL_AUTOCOMPLETE_RESPONSE_MSG = 'eda-ext-eql-autocomplete-response';
 const EQL_AUTOCOMPLETE_REQUEST_MSG = 'eda-ext-eql-autocomplete-request';
 const BRIDGE_READY_MSG = 'eda-ext-bridge-ready';
+const SPOTLIGHT_BRIDGE_CHANNEL = 'eda-ext-spotlight-bridge';
+const PAGE_TARGET_ORIGIN = window.location.origin === 'null' ? '*' : window.location.origin;
 
 interface NavItem {
   label: string;
@@ -306,9 +308,11 @@ function setupMessageListener(): void {
 
   window.addEventListener('message', (event: MessageEvent) => {
     if (event.source !== window) return;
+    if (window.location.origin !== 'null' && event.origin !== window.location.origin) return;
     if (!event.data || typeof event.data !== 'object') return;
 
     const data = event.data as Record<string, unknown>;
+    if (data.channel !== SPOTLIGHT_BRIDGE_CHANNEL) return;
 
     if (data.type === BRIDGE_READY_MSG) {
       bridgeReady = true;
@@ -988,7 +992,12 @@ function sendEqlQuery(query: string): void {
   eqlLoading = true;
   eqlResults = [];
   eqlError = '';
-  window.postMessage({ type: EQL_REQUEST_MSG, query, reqId: eqlLatestReqId }, '*');
+  window.postMessage({
+    type: EQL_REQUEST_MSG,
+    channel: SPOTLIGHT_BRIDGE_CHANNEL,
+    query,
+    reqId: eqlLatestReqId,
+  }, PAGE_TARGET_ORIGIN);
 }
 
 function sendEqlAutocompleteQuery(query: string): void {
@@ -999,10 +1008,11 @@ function sendEqlAutocompleteQuery(query: string): void {
   eqlAutocompleteItems = [];
   window.postMessage({
     type: EQL_AUTOCOMPLETE_REQUEST_MSG,
+    channel: SPOTLIGHT_BRIDGE_CHANNEL,
     query,
     reqId: eqlAutocompleteLatestReqId,
     completionLimit: 10,
-  }, '*');
+  }, PAGE_TARGET_ORIGIN);
 }
 
 function requestApps(force = false): void {
@@ -1014,11 +1024,11 @@ function requestApps(force = false): void {
     if (!apiLoading) return;
     apiLoading = false;
     apiError = bridgeReady
-      ? 'Waiting for EDA auth token'
+      ? 'Waiting for EDA API response'
       : 'Search bridge did not initialize';
     if (appRenderCallback) appRenderCallback();
   }, 8_000);
-  window.postMessage({ type: APPS_REQUEST_MSG, force }, '*');
+  window.postMessage({ type: APPS_REQUEST_MSG, channel: SPOTLIGHT_BRIDGE_CHANNEL, force }, PAGE_TARGET_ORIGIN);
 }
 
 function openSpotlight() {
@@ -1273,12 +1283,11 @@ function closeSpotlightImmediately(): void {
 }
 
 /**
- * Must be called at document_start (before page scripts load)
- * to intercept the auth token from XHR requests.
+ * Initializes spotlight message listeners in the content script.
+ * The page bridge script is injected lazily when spotlight opens.
  */
 export function injectSpotlightInterceptor(): void {
   setupMessageListener();
-  injectAppsFetcher();
 }
 
 export function initSpotlight(): void {

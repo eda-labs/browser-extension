@@ -22,7 +22,7 @@
   "web_accessible_resources": [
     {
       "resources": ["spotlight-page.js"],
-      "matches": ["<all_urls>"]
+      "matches": ["https://*/*", "https://eda.dev/*", "https://*.eda.dev/*"]
     }
   ],
   "icons": {

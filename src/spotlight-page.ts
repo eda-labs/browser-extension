@@ -5,8 +5,11 @@ const EQL_RESPONSE_MSG = 'eda-ext-eql-response';
 const EQL_AUTOCOMPLETE_REQUEST_MSG = 'eda-ext-eql-autocomplete-request';
 const EQL_AUTOCOMPLETE_RESPONSE_MSG = 'eda-ext-eql-autocomplete-response';
 const BRIDGE_READY_MSG = 'eda-ext-bridge-ready';
+const SPOTLIGHT_BRIDGE_CHANNEL = 'eda-ext-spotlight-bridge';
 const EDA_REQUEST_MSG = 'eda-request';
 const EDA_RESPONSE_MSG = 'eda-response';
+const EDA_REQUEST_CHANNEL = 'eda-ext-spotlight-request';
+const PAGE_TARGET_ORIGIN = window.location.origin === 'null' ? '*' : window.location.origin;
 
 interface ParsedKind {
   plural: string;
@@ -55,7 +58,7 @@ interface EdaResponsePayload {
 }
 
 function post(type: string, payload: Record<string, unknown>): void {
-  window.postMessage({ type, ...payload }, '*');
+  window.postMessage({ type, channel: SPOTLIGHT_BRIDGE_CHANNEL, ...payload }, PAGE_TARGET_ORIGIN);
 }
 
 function getState(): NonNullable<SpotlightWindow['__edaExtSpotlightState']> {
@@ -129,9 +132,11 @@ function sendEdaRequest(path: string, method = 'GET', body?: string): Promise<Ed
   return new Promise((resolve, reject) => {
     const onMessage = (event: MessageEvent): void => {
       if (event.source !== window) return;
+      if (window.location.origin !== 'null' && event.origin !== window.location.origin) return;
       if (!event.data || typeof event.data !== 'object') return;
       const data = event.data as Record<string, unknown>;
       if (data.type !== EDA_RESPONSE_MSG) return;
+      if (data.channel !== EDA_REQUEST_CHANNEL) return;
       if (data.id !== id) return;
       cleanup();
       resolve({
@@ -154,11 +159,12 @@ function sendEdaRequest(path: string, method = 'GET', body?: string): Promise<Ed
     window.addEventListener('message', onMessage);
     window.postMessage({
       type: EDA_REQUEST_MSG,
+      channel: EDA_REQUEST_CHANNEL,
       id,
       path,
       method,
       body,
-    }, '*');
+    }, PAGE_TARGET_ORIGIN);
   });
 }
 
@@ -574,9 +580,11 @@ async function runEqlAutocomplete(query: string, reqId: number, completionLimit:
 function setupMessageBridge(): void {
   window.addEventListener('message', (event: MessageEvent) => {
     if (event.source !== window) return;
+    if (window.location.origin !== 'null' && event.origin !== window.location.origin) return;
     if (!event.data || typeof event.data !== 'object') return;
 
     const data = event.data as Record<string, unknown>;
+    if (data.channel !== SPOTLIGHT_BRIDGE_CHANNEL) return;
     if (data.type === APPS_REQUEST_MSG) {
       void fetchAllResources(Boolean(data.force));
       return;
