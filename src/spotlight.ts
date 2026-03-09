@@ -519,6 +519,54 @@ function createSpotlight(): HTMLDivElement {
       font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace;
     }
     .eda-spotlight-item--autocomplete .eda-spotlight-item-path { display: none; }
+    .eda-spotlight-eql-table-wrap {
+      margin: 4px 12px 12px;
+      border: 1px solid #4a536180;
+      border-radius: 8px;
+      overflow: auto;
+      max-height: 280px;
+      background: #111824;
+    }
+    .eda-spotlight-eql-table {
+      width: max-content;
+      min-width: 100%;
+      border-collapse: collapse;
+      font-size: 12px;
+    }
+    .eda-spotlight-eql-table th,
+    .eda-spotlight-eql-table td {
+      padding: 6px 8px;
+      border-bottom: 1px solid #4a536140;
+      text-align: left;
+      white-space: nowrap;
+      max-width: 260px;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      vertical-align: top;
+    }
+    .eda-spotlight-eql-table th {
+      position: sticky;
+      top: 0;
+      z-index: 1;
+      background: #1d2633;
+      color: #c9ced6;
+      text-transform: uppercase;
+      letter-spacing: 0.3px;
+      font-size: 10px;
+      font-weight: 600;
+    }
+    .eda-spotlight-eql-table td { color: #dde5f2; }
+    .eda-spotlight-eql-row { cursor: pointer; }
+    .eda-spotlight-eql-row:hover { background: #6098ff22; }
+    .eda-spotlight-eql-cell-resource {
+      max-width: 360px;
+      font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace;
+    }
+    .eda-spotlight-eql-note {
+      padding: 6px 12px 10px;
+      color: #c9ced680;
+      font-size: 11px;
+    }
     .eda-spotlight-empty {
       padding: 24px 16px; text-align: center; color: #c9ced680; font-size: 13px;
     }
@@ -595,6 +643,107 @@ function escapeHtml(s: string): string {
 
 function escapeAttr(s: string): string {
   return s.replace(/&/g, '&amp;').replace(/"/g, '&quot;');
+}
+
+function toFlatCellValue(value: unknown): string {
+  if (value == null) return '';
+  if (typeof value === 'string') return value;
+  if (typeof value === 'number' || typeof value === 'boolean') return String(value);
+  if (Array.isArray(value)) {
+    if (value.length === 0) return '[]';
+    const preview = value
+      .slice(0, 3)
+      .map((entry) => {
+        if (entry == null) return 'null';
+        if (typeof entry === 'string' || typeof entry === 'number' || typeof entry === 'boolean') return String(entry);
+        if (Array.isArray(entry)) return '[..]';
+        return '{..}';
+      })
+      .join(', ');
+    const suffix = value.length > 3 ? ` +${value.length - 3}` : '';
+    return `[${preview}${suffix}]`;
+  }
+  return '';
+}
+
+function flattenResultFields(value: unknown, prefix = '', depth = 0, out: Map<string, string> = new Map<string, string>()): Map<string, string> {
+  if (!value || typeof value !== 'object') return out;
+
+  if (Array.isArray(value)) {
+    if (prefix) {
+      const cell = toFlatCellValue(value);
+      if (cell) out.set(prefix, cell);
+    }
+    return out;
+  }
+
+  const record = value as Record<string, unknown>;
+  for (const [key, entry] of Object.entries(record)) {
+    if (!key) continue;
+    const path = prefix ? `${prefix}.${key}` : key;
+
+    const primitiveCell = toFlatCellValue(entry);
+    if (primitiveCell) {
+      out.set(path, primitiveCell);
+      continue;
+    }
+
+    if (depth < 2 && entry && typeof entry === 'object') {
+      flattenResultFields(entry, path, depth + 1, out);
+    }
+  }
+
+  return out;
+}
+
+function pickTableColumns(rows: Array<Map<string, string>>): string[] {
+  const preferred = [
+    'kind',
+    'namespace',
+    'name',
+    'apiVersion',
+    'metadata.namespace',
+    'metadata.name',
+    'status.severity',
+    'status.state',
+    'status.phase',
+    'status.health',
+    'spec.node',
+    'node',
+  ];
+
+  const columns: string[] = [];
+  const hasColumn = (col: string) => rows.some((row) => Boolean(row.get(col)));
+
+  for (const col of preferred) {
+    if (!hasColumn(col) || columns.includes(col)) continue;
+    columns.push(col);
+  }
+
+  const freq = new Map<string, number>();
+  for (const row of rows) {
+    for (const [key, value] of row.entries()) {
+      if (!value) continue;
+      if (key.startsWith('metadata.annotations')) continue;
+      if (key.endsWith('managedFields')) continue;
+      freq.set(key, (freq.get(key) ?? 0) + 1);
+    }
+  }
+
+  const extra = Array.from(freq.entries())
+    .filter(([key]) => !columns.includes(key))
+    .sort((a, b) => {
+      if (b[1] !== a[1]) return b[1] - a[1];
+      return a[0].length - b[0].length;
+    })
+    .map(([key]) => key);
+
+  for (const key of extra) {
+    columns.push(key);
+    if (columns.length >= 8) break;
+  }
+
+  return columns.slice(0, 8);
 }
 
 function navigate(href: string) {
@@ -770,18 +919,33 @@ function renderEqlResults(
     return;
   }
 
-  let currentSection = '';
-  eqlItems.forEach((item, i) => {
-    if (item.section !== currentSection) {
-      currentSection = item.section;
-      html += `<div class="eda-spotlight-section">${escapeHtml(currentSection)}</div>`;
+  const displayedItems = eqlItems.slice(0, 40);
+  const flattenedRows = displayedItems.map((entry) => flattenResultFields(entry.fields));
+  const columns = pickTableColumns(flattenedRows);
+
+  html += '<div class="eda-spotlight-eql-table-wrap"><table class="eda-spotlight-eql-table"><thead><tr>';
+  html += '<th>resource</th>';
+  for (const col of columns) {
+    html += `<th>${escapeHtml(col)}</th>`;
+  }
+  html += '</tr></thead><tbody>';
+
+  displayedItems.forEach((item, i) => {
+    const row = flattenedRows[i];
+    html += `<tr class="eda-spotlight-eql-row" data-eql-result-index="${i}">`;
+    html += `<td class="eda-spotlight-eql-cell-resource" title="${escapeAttr(item.path)}">${escapeHtml(item.path)}</td>`;
+    for (const col of columns) {
+      const value = row.get(col) ?? '';
+      html += `<td title="${escapeAttr(value)}">${escapeHtml(value)}</td>`;
     }
-    html += `
-      <button class="eda-spotlight-item" data-index="${i}" data-selected="false" data-eql-result-index="${i}">
-        <span class="eda-spotlight-item-label">${escapeHtml(item.label)}</span>
-        <span class="eda-spotlight-item-path">${escapeHtml(item.path)}</span>
-      </button>`;
+    html += '</tr>';
   });
+
+  html += '</tbody></table></div>';
+
+  if (eqlItems.length > displayedItems.length) {
+    html += `<div class="eda-spotlight-eql-note">Showing ${displayedItems.length} of ${eqlItems.length} EQL results</div>`;
+  }
 
   container.innerHTML = html;
 }
@@ -1029,23 +1193,27 @@ function openSpotlight() {
   });
 
   results.addEventListener('click', (e) => {
-    const btn = (e.target as HTMLElement).closest<HTMLElement>('.eda-spotlight-item');
-    if (!btn) return;
+    const target = e.target as HTMLElement;
+    const btn = target.closest<HTMLElement>('.eda-spotlight-item');
+    const eqlRow = target.closest<HTMLElement>('[data-eql-result-index]');
+    if (!btn && !eqlRow) return;
 
     if (eqlMode) {
-      const autocompleteIdx = Number.parseInt(btn.dataset.eqlAutocompleteIndex ?? '', 10);
-      if (!Number.isNaN(autocompleteIdx)) {
+      const autocompleteIdx = Number.parseInt(btn?.dataset.eqlAutocompleteIndex ?? '', 10);
+      if (btn && !Number.isNaN(autocompleteIdx)) {
         selectedIndex = autocompleteIdx;
         applyAutocomplete(autocompleteIdx);
         return;
       }
 
-      const resultIdx = Number.parseInt(btn.dataset.eqlResultIndex ?? '', 10);
+      const resultIdx = Number.parseInt((btn?.dataset.eqlResultIndex ?? eqlRow?.dataset.eqlResultIndex) ?? '', 10);
       if (!Number.isNaN(resultIdx)) {
         navigateToEql();
       }
       return;
     }
+
+    if (!btn) return;
 
     const idx = parseInt(btn.dataset.index ?? '0', 10);
     const item = filteredItems[idx];
