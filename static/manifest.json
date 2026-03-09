@@ -14,11 +14,7 @@
   },
   "content_scripts": [
     {
-      "matches": [
-        "https://eda.dev/*",
-        "https://*.eda.dev/*",
-        "https://*/core/httpproxy/v1/keycloak/realms/eda/protocol/openid-connect/*"
-      ],
+      "matches": ["<all_urls>"],
       "js": ["content.js"],
       "run_at": "document_start"
     }

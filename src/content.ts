@@ -1,6 +1,16 @@
 import { api } from './core/api';
 import { getErrorMessage } from './core/utils';
 import { postCurrentStatus, handlePageMessage, handleStorageChange } from './core/handlers';
+import { injectSpotlightInterceptor, initSpotlight } from './spotlight';
+
+// Inject the XHR interceptor immediately at document_start
+// (before any page scripts run) to capture the auth token
+injectSpotlightInterceptor();
+
+function isEdaSite(): boolean {
+  const desc = document.querySelector('meta[name="description"]');
+  return desc?.getAttribute('content') === 'EDA';
+}
 
 window.addEventListener('message', (event: MessageEvent) => void handlePageMessage(event));
 
@@ -106,8 +116,14 @@ async function tryAutoLogin(): Promise<void> {
   form.submit();
 }
 
-if (document.readyState === 'loading') {
-  document.addEventListener('DOMContentLoaded', () => void tryAutoLogin());
-} else {
+function initEdaFeatures(): void {
+  if (!isEdaSite()) return;
   void tryAutoLogin();
+  initSpotlight();
+}
+
+if (document.readyState === 'loading') {
+  document.addEventListener('DOMContentLoaded', initEdaFeatures);
+} else {
+  initEdaFeatures();
 }
