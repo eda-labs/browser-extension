@@ -51,10 +51,17 @@ function PopupApp() {
       const draft = localStorage.getItem('draft');
       if (draft) {
         const d = JSON.parse(draft) as Record<string, string | boolean | null>;
-        setSelectedTargetId((d.selectedTargetId as string | null) ?? null);
-        setIsNewTarget(!!d.isNewTarget);
+        const draftSelectedTargetId = (d.selectedTargetId as string | null) ?? null;
+        const draftIsNewTarget = !!d.isNewTarget;
+        setSelectedTargetId(draftSelectedTargetId);
+        setIsNewTarget(draftIsNewTarget);
         setEditEdaUrl((d.edaUrl as string) ?? '');
         setEditUsername((d.username as string) ?? '');
+        if (!draftIsNewTarget && draftSelectedTargetId) {
+          const draftTarget = loadedTargets.find((t) => t.id === draftSelectedTargetId);
+          setPassword(draftTarget?.password ?? '');
+          setClientSecret(draftTarget?.clientSecret ?? '');
+        }
       } else if (loadedActiveId && loadedTargets.some((t) => t.id === loadedActiveId)) {
         selectTarget(loadedTargets, loadedActiveId);
       } else if (loadedTargets.length > 0) {
@@ -93,8 +100,8 @@ function PopupApp() {
     setIsNewTarget(false);
     setEditEdaUrl(target.edaUrl.replace(/^https?:\/\//i, ''));
     setEditUsername(target.username);
-    setPassword('');
-    setClientSecret('');
+    setPassword(target.password ?? '');
+    setClientSecret(target.clientSecret ?? '');
     setError('');
   }
 
@@ -111,7 +118,7 @@ function PopupApp() {
   async function handleSaveTarget(): Promise<TargetProfile> {
     const edaUrl = 'https://' + editEdaUrl.replace(/\/+$/, '');
     const id = edaUrl;
-    const target: TargetProfile = { id, edaUrl, username: editUsername };
+    const target: TargetProfile = { id, edaUrl, username: editUsername, password, clientSecret };
 
     const stored = await api.storage.local.get(['targets']);
     const existing = (stored.targets as TargetProfile[] | undefined) ?? [];

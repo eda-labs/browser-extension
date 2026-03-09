@@ -250,6 +250,10 @@ async function restoreSession(): Promise<void> {
   const activeTarget = targets.find((t) => t.id === state.activeTargetId);
   if (activeTarget) {
     state.username = activeTarget.username;
+    state.password = activeTarget.password;
+    if (activeTarget.clientSecret) {
+      state.clientSecret = activeTarget.clientSecret;
+    }
   }
 
   if (Date.now() < state.accessTokenExpiresAt) {
@@ -276,6 +280,8 @@ async function migrateStorage(): Promise<void> {
         id: typeof entry.id === 'string' ? entry.id : crypto.randomUUID(),
         edaUrl: typeof entry.edaUrl === 'string' ? entry.edaUrl : '',
         username: typeof entry.username === 'string' ? entry.username : '',
+        password: typeof entry.password === 'string' ? entry.password : '',
+        clientSecret: typeof entry.clientSecret === 'string' ? entry.clientSecret : '',
       }))
       .filter((target) => target.edaUrl);
     await api.storage.local.set({ targets: normalizedTargets });
@@ -285,6 +291,8 @@ async function migrateStorage(): Promise<void> {
       id: crypto.randomUUID(),
       edaUrl: stored.edaUrl as string,
       username: '',
+      password: '',
+      clientSecret: '',
     };
     await api.storage.local.set({
       targets: [target],

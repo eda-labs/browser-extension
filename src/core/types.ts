@@ -4,6 +4,8 @@ export interface TargetProfile {
   id: string;
   edaUrl: string;
   username: string;
+  password: string;
+  clientSecret: string;
 }
 
 export interface EdaState {
@@ -21,6 +23,7 @@ export interface EdaState {
 
 export interface StoredConfig {
   edaUrl?: string;
+  clientSecret?: string;
   accessToken?: string;
   refreshToken?: string;
   accessTokenExpiresAt?: number;
