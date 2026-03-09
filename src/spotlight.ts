@@ -1,7 +1,12 @@
+import { api } from './core/api';
+
 const SPOTLIGHT_ID = 'eda-ext-spotlight';
+const PAGE_BRIDGE_ID = 'eda-ext-spotlight-page-bridge';
+const APPS_REQUEST_MSG = 'eda-ext-fetch-apps';
 const APPS_RESPONSE_MSG = 'eda-ext-apps-response';
 const EQL_RESPONSE_MSG = 'eda-ext-eql-response';
 const EQL_REQUEST_MSG = 'eda-ext-eql-request';
+const BRIDGE_READY_MSG = 'eda-ext-bridge-ready';
 
 interface NavItem {
   label: string;
@@ -24,6 +29,11 @@ const QUICK_ACTIONS: NavItem[] = [];
 // Items fetched from the /apps API
 let apiItems: NavItem[] = [];
 let apiFetched = false;
+let apiLoading = false;
+let apiError = '';
+let bridgeReady = false;
+let appRenderCallback: (() => void) | null = null;
+let appsRequestTimeout: ReturnType<typeof setTimeout> | null = null;
 
 const GROUP_TO_SECTION: Record<string, string> = {
   'aaa.eda.nokia.com': 'Security',
@@ -90,156 +100,27 @@ function humanizeLabel(text: string): string {
     .trim();
 }
 
-/**
- * Inject a script into the page context BEFORE any page JS runs.
- * Patches XMLHttpRequest.setRequestHeader to capture the first Bearer token
- * the EDA app sends (via its Keycloak/axios stack), then fetches /apps with it.
- *
- * Must be called at document_start to beat the page's own scripts.
- */
 function injectAppsFetcher(): void {
+  if (document.getElementById(PAGE_BRIDGE_ID)) {
+    return;
+  }
+
   const script = document.createElement('script');
-  script.textContent = `(function() {
-    // R8-equivalent: check OpenAPI paths for user access to a resource
-    function checkAccess(openApiPaths, group, version, plural, namespaced, isWorkflow) {
-      var access = 'None';
-      // Build regex matching the resource's API path (same as UI's R8)
-      var base = isWorkflow
-        ? '/workflows/v1/' + group + '/' + version + '/' + plural
-        : '/apps/' + group + '/' + version + (namespaced ? '/[^/]+' : '') + '/' + plural;
-      var re;
-      try { re = new RegExp('^' + base + '(/.+)?$'); } catch(e) { return 'None'; }
-      for (var path in openApiPaths) {
-        if (!re.test(path)) continue;
-        var methods = openApiPaths[path];
-        for (var method in methods) {
-          var m = method.toLowerCase();
-          if (m !== 'get') access = 'ReadWrite';
-          else if (access === 'None') access = 'Read';
-        }
-      }
-      return access;
-    }
+  script.id = PAGE_BRIDGE_ID;
+  script.src = api.runtime.getURL('spotlight-page.js');
+  script.async = false;
+  script.onerror = () => {
+    apiError = 'Could not load spotlight bridge script';
+    apiLoading = false;
+    if (appRenderCallback) appRenderCallback();
+  };
 
-    function fetchAllResources(token) {
-      var headers = { 'Authorization': 'Bearer ' + token };
-
-      // Step 1: GET /apps to get group list
-      fetch('/apps', { headers: headers })
-        .then(function(r) { return r.json(); })
-        .then(function(resp) {
-          var groups = resp && resp.groups;
-          if (!Array.isArray(groups)) return;
-
-          // Step 2: For each group, fetch BOTH the resource list AND the OpenAPI spec
-          var promises = groups.map(function(group) {
-            var pv = group.preferredVersion || (group.versions && group.versions[0]);
-            if (!pv || !group.name) return Promise.resolve(null);
-            var ver = pv.version || 'v1';
-            var eg = encodeURIComponent(group.name);
-            var ev = encodeURIComponent(ver);
-
-            // Fetch resource list (for CRD metadata)
-            var resList = fetch('/apps/' + eg + '/' + ev, { headers: headers })
-              .then(function(r) { return r.json(); })
-              .catch(function() { return null; });
-
-            // Fetch OpenAPI spec (for R8 access check)
-            var openApi = fetch('/openapi/v3/apps/' + eg + '/' + ev, { headers: headers })
-              .then(function(r) { return r.json(); })
-              .catch(function() { return null; });
-
-            return Promise.all([resList, openApi]).then(function(results) {
-              var resourceList = results[0];
-              var openApiSpec = results[1];
-              var resources = resourceList && resourceList.resources;
-              var paths = (openApiSpec && openApiSpec.paths) || {};
-              if (!Array.isArray(resources)) return [];
-
-              var out = [];
-              resources.forEach(function(r) {
-                if (r.name.includes('/')) return;
-                // Check standard resource access
-                var access = checkAccess(paths, group.name, ver, r.name, r.namespaced, false);
-                if (access !== 'None') {
-                  out.push({
-                    plural: r.name,
-                    kind: r.kind,
-                    label: r.kind,
-                    category: '',
-                    panel: 'main',
-                    group: group.name,
-                    version: ver,
-                    namespaced: r.namespaced,
-                    isWorkflow: false
-                  });
-                }
-                // Also check if this is a workflow CRD (has /workflows/v1/... paths)
-                var wfAccess = checkAccess(paths, group.name, ver, r.name, r.namespaced, true);
-                if (wfAccess !== 'None') {
-                  out.push({
-                    plural: r.name,
-                    kind: r.kind,
-                    label: r.kind,
-                    category: '',
-                    panel: 'main',
-                    group: group.name,
-                    version: ver,
-                    namespaced: r.namespaced,
-                    isWorkflow: true
-                  });
-                }
-              });
-              return out;
-            });
-          });
-
-          Promise.all(promises).then(function(results) {
-            var allKinds = [];
-            results.forEach(function(kinds) {
-              if (kinds) allKinds = allKinds.concat(kinds);
-            });
-            window.postMessage({ type: '${APPS_RESPONSE_MSG}', data: allKinds }, '*');
-          });
-        })
-        .catch(function() {});
-    }
-
-    var origSetHeader = XMLHttpRequest.prototype.setRequestHeader;
-    XMLHttpRequest.prototype.setRequestHeader = function(name, value) {
-      if (name === 'Authorization' && typeof value === 'string' && value.startsWith('Bearer ') && !window.__edaExtToken) {
-        window.__edaExtToken = value.slice(7);
-        XMLHttpRequest.prototype.setRequestHeader = origSetHeader;
-        fetchAllResources(window.__edaExtToken);
-      }
-      return origSetHeader.call(this, name, value);
-    };
-
-    window.addEventListener('message', function(e) {
-      if (e.data && e.data.type === 'eda-ext-fetch-apps' && window.__edaExtToken) {
-        fetchAllResources(window.__edaExtToken);
-      }
-      if (e.data && e.data.type === '${EQL_REQUEST_MSG}' && window.__edaExtToken) {
-        var query = e.data.query;
-        var reqId = e.data.reqId;
-        var params = new URLSearchParams({ query: query });
-        fetch('/core/query/v1/eql?' + params.toString(), {
-          headers: {
-            'Authorization': 'Bearer ' + window.__edaExtToken
-          }
-        })
-        .then(function(r) { return r.json(); })
-        .then(function(data) {
-          window.postMessage({ type: '${EQL_RESPONSE_MSG}', reqId: reqId, data: data }, '*');
-        })
-        .catch(function(err) {
-          window.postMessage({ type: '${EQL_RESPONSE_MSG}', reqId: reqId, error: err.message || 'EQL query failed' }, '*');
-        });
-      }
-    });
-  })();`;
-  (document.documentElement || document.head).prepend(script);
-  script.remove();
+  const root = document.documentElement || document.head;
+  if (!root) {
+    document.addEventListener('DOMContentLoaded', injectAppsFetcher, { once: true });
+    return;
+  }
+  root.prepend(script);
 }
 
 interface ParsedKind {
@@ -254,8 +135,8 @@ interface ParsedKind {
   isWorkflow?: boolean;
 }
 
-function processAppsResponse(data: unknown): void {
-  if (!Array.isArray(data)) return;
+function processAppsResponse(data: unknown): boolean {
+  if (!Array.isArray(data)) return false;
 
   const items: NavItem[] = [];
   const seen = new Set(QUICK_ACTIONS.map((p) => p.href));
@@ -307,6 +188,8 @@ function processAppsResponse(data: unknown): void {
 
   apiItems = items;
   apiFetched = true;
+  apiError = '';
+  return true;
 }
 
 // EQL query state
@@ -316,6 +199,7 @@ let eqlResults: EqlResult[] = [];
 let eqlError = '';
 let eqlLoading = false;
 let eqlRenderCallback: (() => void) | null = null;
+let messageListenerSetup = false;
 
 function processEqlResponse(data: unknown): EqlResult[] {
   if (!data || typeof data !== 'object') return [];
@@ -343,23 +227,53 @@ function processEqlResponse(data: unknown): EqlResult[] {
 }
 
 function setupMessageListener(): void {
+  if (messageListenerSetup) return;
+  messageListenerSetup = true;
+
   window.addEventListener('message', (event: MessageEvent) => {
     if (event.source !== window) return;
+    if (!event.data || typeof event.data !== 'object') return;
 
-    if (event.data?.type === APPS_RESPONSE_MSG) {
-      processAppsResponse(event.data.data);
+    const data = event.data as Record<string, unknown>;
+
+    if (data.type === BRIDGE_READY_MSG) {
+      bridgeReady = true;
+      if ((apiLoading || !apiFetched) && !apiItems.length) {
+        requestApps(false);
+      }
+      return;
     }
 
-    if (event.data?.type === EQL_RESPONSE_MSG) {
-      const reqId = event.data.reqId as number;
+    if (data.type === APPS_RESPONSE_MSG) {
+      if (appsRequestTimeout) {
+        clearTimeout(appsRequestTimeout);
+        appsRequestTimeout = null;
+      }
+      apiLoading = false;
+
+      const responseError = typeof data.error === 'string' ? data.error : '';
+      if (responseError && apiItems.length === 0) {
+        apiError = responseError;
+      }
+      if (processAppsResponse(data.data)) {
+        apiError = '';
+      } else if (apiItems.length === 0 && !responseError) {
+        apiError = 'Invalid apps response';
+      }
+      if (appRenderCallback) appRenderCallback();
+      return;
+    }
+
+    if (data.type === EQL_RESPONSE_MSG) {
+      const reqId = data.reqId as number;
       if (reqId !== eqlLatestReqId) return; // stale response
       eqlLoading = false;
-      if (event.data.error) {
-        eqlError = event.data.error as string;
+      if (data.error) {
+        eqlError = data.error as string;
         eqlResults = [];
       } else {
         eqlError = '';
-        eqlResults = processEqlResponse(event.data.data);
+        eqlResults = processEqlResponse(data.data);
       }
       if (eqlRenderCallback) eqlRenderCallback();
     }
@@ -370,7 +284,7 @@ function setupMessageListener(): void {
 function scoreMatch(item: NavItem, query: string): number {
   const label = item.label.toLowerCase();
   const href = item.href.toLowerCase();
-  const keywords = item.keywords;
+  const keywords = item.keywords.toLowerCase();
 
   if (label === query) return 100;
   if (label.startsWith(query)) return 90;
@@ -441,10 +355,12 @@ function getAllItems(): NavItem[] {
   const items: NavItem[] = [];
 
   for (const item of [...QUICK_ACTIONS, ...apiItems]) {
-    if (!seen.has(item.href)) {
-      seen.add(item.href);
-      items.push(item);
-    }
+    const key = item.action === 'workflow-run' && item.workflowMeta
+      ? `workflow:${item.workflowMeta.group}/${item.workflowMeta.version}/${item.workflowMeta.plural}`
+      : item.href;
+    if (seen.has(key)) continue;
+    seen.add(key);
+    items.push(item);
   }
 
   items.sort((a, b) => {
@@ -560,7 +476,13 @@ function highlightMatch(text: string, query: string): string {
   return `${escapeHtml(before)}<span class="eda-spotlight-highlight">${escapeHtml(match)}</span>${escapeHtml(after)}`;
 }
 
-function renderResults(container: HTMLElement, items: NavItem[], query: string, countEl?: HTMLElement) {
+function renderResults(
+  container: HTMLElement,
+  items: NavItem[],
+  query: string,
+  countEl?: HTMLElement,
+  emptyMessage = 'No matching pages',
+) {
   filteredItems = items;
   selectedIndex = Math.max(0, Math.min(selectedIndex, items.length - 1));
 
@@ -569,7 +491,7 @@ function renderResults(container: HTMLElement, items: NavItem[], query: string, 
   }
 
   if (items.length === 0) {
-    container.innerHTML = '<div class="eda-spotlight-empty">No matching pages</div>';
+    container.innerHTML = `<div class="eda-spotlight-empty">${escapeHtml(emptyMessage)}</div>`;
     return;
   }
 
@@ -625,7 +547,7 @@ function triggerWorkflowRun(meta: { group: string; version: string; plural: stri
   function tryClick() {
     attempt++;
     // Look for the "New Workflow Run" button - typically a button containing that text
-    const buttons = document.querySelectorAll('button');
+    const buttons = Array.from(document.querySelectorAll('button'));
     let newRunBtn: HTMLElement | null = null;
     for (const btn of buttons) {
       const text = btn.textContent?.trim().toLowerCase() ?? '';
@@ -637,7 +559,7 @@ function triggerWorkflowRun(meta: { group: string; version: string; plural: stri
 
     // Also check for MUI Fab buttons (floating action button with + icon)
     if (!newRunBtn) {
-      const fabs = document.querySelectorAll('[class*="Fab"], [class*="fab"], [aria-label*="new"], [aria-label*="create"], [aria-label*="add"]');
+      const fabs = Array.from(document.querySelectorAll('[class*="Fab"], [class*="fab"], [aria-label*="new"], [aria-label*="create"], [aria-label*="add"]'));
       for (const fab of fabs) {
         if (fab instanceof HTMLElement) {
           newRunBtn = fab;
@@ -675,11 +597,11 @@ function selectWorkflowType(meta: { group: string; version: string; plural: stri
   }
 
   // Look for a select/dropdown that contains workflow type options
-  const selects = document.querySelectorAll('select, [role="listbox"], [role="combobox"], [class*="Select"]');
+  const selects = Array.from(document.querySelectorAll('select, [role="listbox"], [role="combobox"], [class*="Select"]'));
   for (const sel of selects) {
     // For native select elements
     if (sel instanceof HTMLSelectElement) {
-      for (const opt of sel.options) {
+      for (const opt of Array.from(sel.options)) {
         if (opt.text.toLowerCase().includes(meta.kind.toLowerCase()) || opt.value.toLowerCase().includes(meta.plural.toLowerCase())) {
           sel.value = opt.value;
           sel.dispatchEvent(new Event('change', { bubbles: true }));
@@ -691,13 +613,13 @@ function selectWorkflowType(meta: { group: string; version: string; plural: stri
 
   // For MUI Select components, try clicking the select to open the dropdown,
   // then clicking the matching option
-  const muiSelects = document.querySelectorAll('[class*="MuiSelect"], [class*="select"], [role="button"][aria-haspopup]');
+  const muiSelects = Array.from(document.querySelectorAll('[class*="MuiSelect"], [class*="select"], [role="button"][aria-haspopup]'));
   for (const muiSel of muiSelects) {
     if (muiSel instanceof HTMLElement) {
       muiSel.click();
       setTimeout(() => {
         // Look for the option in the opened menu
-        const menuItems = document.querySelectorAll('[role="option"], [role="menuitem"], [class*="MenuItem"], li[class*="MuiMenuItem"]');
+        const menuItems = Array.from(document.querySelectorAll('[role="option"], [role="menuitem"], [class*="MenuItem"], li[class*="MuiMenuItem"]'));
         for (const item of menuItems) {
           const text = item.textContent?.trim().toLowerCase() ?? '';
           if (text.includes(meta.kind.toLowerCase()) || text.includes(humanizeLabel(meta.kind).toLowerCase())) {
@@ -763,10 +685,26 @@ function sendEqlQuery(query: string): void {
   window.postMessage({ type: EQL_REQUEST_MSG, query, reqId: eqlLatestReqId }, '*');
 }
 
+function requestApps(force = false): void {
+  apiLoading = true;
+  if (appsRequestTimeout) {
+    clearTimeout(appsRequestTimeout);
+  }
+  appsRequestTimeout = setTimeout(() => {
+    if (!apiLoading) return;
+    apiLoading = false;
+    apiError = bridgeReady
+      ? 'Waiting for EDA auth token'
+      : 'Search bridge did not initialize';
+    if (appRenderCallback) appRenderCallback();
+  }, 8_000);
+  window.postMessage({ type: APPS_REQUEST_MSG, force }, '*');
+}
+
 function openSpotlight() {
-  // Re-fetch if we haven't got apps yet
-  if (!apiFetched) {
-    window.postMessage({ type: 'eda-ext-fetch-apps' }, '*');
+  if (!bridgeReady) injectAppsFetcher();
+  if (!apiLoading && (!apiFetched || apiItems.length === 0)) {
+    requestApps(!apiFetched);
   }
 
   const overlay = createSpotlight();
@@ -777,12 +715,37 @@ function openSpotlight() {
   const backdrop = overlay.querySelector<HTMLElement>('.eda-spotlight-backdrop')!;
   const countEl = overlay.querySelector<HTMLElement>('.eda-spotlight-footer-count')!;
 
-  const navItems = getAllItems();
   selectedIndex = 0;
   let eqlMode = false;
   let eqlDebounceTimer: ReturnType<typeof setTimeout> | null = null;
 
-  renderResults(results, navItems, '', countEl);
+  function getNavEmptyMessage(query: string): string {
+    if (!bridgeReady) return 'Initializing EDA search bridge...';
+    if (apiLoading && apiItems.length === 0) return 'Loading EDA pages...';
+    if (apiError && apiItems.length === 0) return `Could not load pages: ${apiError}`;
+    if (!query && apiItems.length === 0) return 'No pages discovered yet';
+    return 'No matching pages';
+  }
+
+  function renderCurrentNav(rawQuery: string): void {
+    const navItems = getAllItems();
+    const q = rawQuery.toLowerCase().trim();
+    if (!q) {
+      selectedIndex = 0;
+      renderResults(results, navItems, '', countEl, getNavEmptyMessage(''));
+      return;
+    }
+
+    const scored = navItems
+      .map((item) => ({ item, score: scoreMatch(item, q) }))
+      .filter((s) => s.score >= 0)
+      .sort((a, b) => b.score - a.score);
+
+    selectedIndex = 0;
+    renderResults(results, scored.map((s) => s.item), q, countEl, getNavEmptyMessage(q));
+  }
+
+  renderCurrentNav('');
 
   input.focus();
 
@@ -791,6 +754,10 @@ function openSpotlight() {
   }
 
   eqlRenderCallback = renderCurrentEql;
+  appRenderCallback = () => {
+    if (eqlMode) return;
+    renderCurrentNav(input.value);
+  };
 
   function filter() {
     const raw = input.value;
@@ -801,7 +768,7 @@ function openSpotlight() {
       input.placeholder = 'EQL query...';
       const query = raw.trim();
 
-      if (!query) {
+      if (query.length <= 1) {
         eqlResults = [];
         eqlError = '';
         eqlLoading = false;
@@ -822,30 +789,18 @@ function openSpotlight() {
     // Normal navigation mode
     if (eqlMode) {
       eqlMode = false;
-      input.placeholder = 'Search EDA...';
+      input.placeholder = 'Search EDA... (type . for EQL)';
       eqlResults = [];
       eqlError = '';
       eqlLoading = false;
     }
 
-    const q = raw.toLowerCase().trim();
-    if (!q) {
-      selectedIndex = 0;
-      renderResults(results, navItems, '', countEl);
-      return;
-    }
-
-    const scored = navItems
-      .map((item) => ({ item, score: scoreMatch(item, q) }))
-      .filter((s) => s.score >= 0)
-      .sort((a, b) => b.score - a.score);
-
-    selectedIndex = 0;
-    renderResults(results, scored.map((s) => s.item), q, countEl);
+    renderCurrentNav(raw);
   }
 
   function close() {
     eqlRenderCallback = null;
+    appRenderCallback = null;
     if (eqlDebounceTimer) clearTimeout(eqlDebounceTimer);
     overlay.remove();
   }
@@ -947,13 +902,19 @@ function isSpotlightOpen(): boolean {
   return !!document.getElementById(SPOTLIGHT_ID);
 }
 
+function closeSpotlightImmediately(): void {
+  eqlRenderCallback = null;
+  appRenderCallback = null;
+  document.getElementById(SPOTLIGHT_ID)?.remove();
+}
+
 /**
  * Must be called at document_start (before page scripts load)
  * to intercept the auth token from XHR requests.
  */
 export function injectSpotlightInterceptor(): void {
-  injectAppsFetcher();
   setupMessageListener();
+  injectAppsFetcher();
 }
 
 export function initSpotlight(): void {
@@ -963,7 +924,7 @@ export function initSpotlight(): void {
       e.preventDefault();
       e.stopPropagation();
       if (isSpotlightOpen()) {
-        document.getElementById(SPOTLIGHT_ID)?.remove();
+        closeSpotlightImmediately();
       } else {
         openSpotlight();
       }

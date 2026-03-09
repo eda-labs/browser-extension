@@ -11,7 +11,7 @@ if (!targets.length) {
 }
 
 const bgOpts = {
-  entryPoints: ['src/background.ts', 'src/content.ts'],
+  entryPoints: ['src/background.ts', 'src/content.ts', 'src/spotlight-page.ts'],
   bundle: true, format: 'iife', target: 'es2020',
 };
 

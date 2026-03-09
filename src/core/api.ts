@@ -16,6 +16,7 @@ interface BrowserAPI {
   runtime: {
     connect: (connectInfo?: { name?: string }) => Port;
     sendMessage: (message: Record<string, unknown>) => Promise<Record<string, unknown>>;
+    getURL: (path: string) => string;
     onConnect: {
       addListener: (callback: (port: Port) => void) => void;
     };
