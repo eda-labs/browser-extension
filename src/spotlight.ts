@@ -140,6 +140,10 @@ interface ParsedKind {
   version: string;
   namespaced?: boolean;
   isWorkflow?: boolean;
+  isInstance?: boolean;
+  instanceName?: string;
+  instanceNamespace?: string;
+  instanceSearchText?: string;
 }
 
 function processAppsResponse(data: unknown): boolean {
@@ -159,6 +163,8 @@ function processAppsResponse(data: unknown): boolean {
 
   for (const entry of data as ParsedKind[]) {
     if (!entry.plural || !entry.group || !entry.version) continue;
+    const panel = entry.panel || getPanel(entry.group, entry.plural);
+    const href = `/ui/app/${panel}/${encodeURIComponent(entry.group)}/${encodeURIComponent(entry.version)}/${encodeURIComponent(entry.plural)}`;
 
     if (entry.isWorkflow) {
       // Add "Run: <Kind>" workflow item
@@ -180,11 +186,37 @@ function processAppsResponse(data: unknown): boolean {
       continue;
     }
 
-    const panel = entry.panel || getPanel(entry.group, entry.plural);
-    const href = `/ui/app/${panel}/${encodeURIComponent(entry.group)}/${encodeURIComponent(entry.version)}/${encodeURIComponent(entry.plural)}`;
+    if (entry.isInstance) {
+      const instanceName = (entry.instanceName || entry.label || '').trim();
+      if (!instanceName) continue;
+      const instanceNamespace = (entry.instanceNamespace || '').trim();
+      const instanceKey = `instance:${entry.group}/${entry.version}/${entry.plural}/${instanceNamespace}/${instanceName}`;
+      if (seen.has(instanceKey)) continue;
+      seen.add(instanceKey);
 
-    if (seen.has(href)) continue;
-    seen.add(href);
+      const kindLabel = humanizeLabel(entry.kind || entry.plural);
+      const label = instanceNamespace
+        ? `${kindLabel}: ${instanceName} (${instanceNamespace})`
+        : `${kindLabel}: ${instanceName}`;
+      const section = entry.category || groupToSection(entry.group) || 'Resources';
+      const keywords = [
+        instanceName.toLowerCase(),
+        instanceNamespace.toLowerCase(),
+        kindLabel.toLowerCase(),
+        entry.plural.toLowerCase(),
+        entry.group.toLowerCase(),
+        (entry.instanceSearchText || '').toLowerCase(),
+        'resource',
+        'instance',
+      ].join(' ');
+
+      items.push({ label, href, section, keywords });
+      continue;
+    }
+
+    const resourceKey = `resource:${href}`;
+    if (seen.has(resourceKey)) continue;
+    seen.add(resourceKey);
 
     const label = humanizeLabel(entry.label || entry.kind || entry.plural);
     const section = entry.category || groupToSection(entry.group) || 'Resources';
@@ -416,7 +448,7 @@ function getAllItems(): NavItem[] {
   for (const item of [...QUICK_ACTIONS, ...apiItems]) {
     const key = item.action === 'workflow-run' && item.workflowMeta
       ? `workflow:${item.workflowMeta.group}/${item.workflowMeta.version}/${item.workflowMeta.plural}`
-      : item.href;
+      : `${item.href}::${item.label}`;
     if (seen.has(key)) continue;
     seen.add(key);
     items.push(item);

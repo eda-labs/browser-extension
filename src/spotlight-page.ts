@@ -16,6 +16,10 @@ interface ParsedKind {
   version: string;
   namespaced?: boolean;
   isWorkflow?: boolean;
+  isInstance?: boolean;
+  instanceName?: string;
+  instanceNamespace?: string;
+  instanceSearchText?: string;
 }
 
 interface AppsGroup {
@@ -34,6 +38,11 @@ type SpotlightWindow = Window & {
 };
 
 const CACHE_TTL_MS = 60_000;
+const INSTANCE_RESOURCE_LIMIT = 220;
+const INSTANCE_ITEMS_PER_RESOURCE = 250;
+const INSTANCE_FETCH_CONCURRENCY = 6;
+const INSTANCE_TOTAL_LIMIT = 8000;
+const INSTANCE_EQL_QUERY_LIMIT = 1000;
 
 function post(type: string, payload: Record<string, unknown>): void {
   window.postMessage({ type, ...payload }, '*');
@@ -180,6 +189,240 @@ function pickVersion(group: AppsGroup): string | null {
   return null;
 }
 
+function extractObjectArray(data: unknown): Array<Record<string, unknown>> {
+  if (Array.isArray(data)) {
+    return data.filter((item): item is Record<string, unknown> => Boolean(item) && typeof item === 'object');
+  }
+  if (!data || typeof data !== 'object') return [];
+
+  const record = data as Record<string, unknown>;
+  for (const key of ['items', 'data', 'resources', 'results']) {
+    const candidate = record[key];
+    if (Array.isArray(candidate)) {
+      return candidate.filter((item): item is Record<string, unknown> => Boolean(item) && typeof item === 'object');
+    }
+  }
+
+  for (const value of Object.values(record)) {
+    if (!Array.isArray(value)) continue;
+    const arr = value.filter((item): item is Record<string, unknown> => Boolean(item) && typeof item === 'object');
+    if (arr.length > 0) return arr;
+  }
+
+  return [];
+}
+
+function extractItemName(item: Record<string, unknown>): string {
+  const direct = typeof item.name === 'string' ? item.name.trim() : '';
+  if (direct) return direct;
+  const metadata = item.metadata && typeof item.metadata === 'object'
+    ? item.metadata as Record<string, unknown>
+    : null;
+  const metadataName = typeof metadata?.name === 'string' ? metadata.name.trim() : '';
+  if (metadataName) return metadataName;
+  const id = typeof item.id === 'string' ? item.id.trim() : '';
+  return id;
+}
+
+function extractItemNamespace(item: Record<string, unknown>): string {
+  const direct = typeof item.namespace === 'string' ? item.namespace.trim() : '';
+  if (direct) return direct;
+  const metadata = item.metadata && typeof item.metadata === 'object'
+    ? item.metadata as Record<string, unknown>
+    : null;
+  return typeof metadata?.namespace === 'string' ? metadata.namespace.trim() : '';
+}
+
+function normalizeIdentifierToken(raw: string): string {
+  return raw
+    .replace(/([a-z0-9])([A-Z])/g, '$1_$2')
+    .replace(/[^a-zA-Z0-9]+/g, '_')
+    .replace(/^_+|_+$/g, '')
+    .toLowerCase();
+}
+
+function singularizeIdentifier(token: string): string {
+  if (token.length <= 1) return token;
+  if (token.endsWith('ies') && token.length > 3) {
+    return `${token.slice(0, -3)}y`;
+  }
+  if (token.endsWith('sses') && token.length > 4) {
+    return token.slice(0, -2);
+  }
+  if (token.endsWith('ses') && token.length > 3) {
+    return token.slice(0, -2);
+  }
+  if (token.endsWith('s') && token.length > 1) {
+    return token.slice(0, -1);
+  }
+  return token;
+}
+
+function buildKindCandidates(resource: ParsedKind): string[] {
+  const candidates = new Set<string>();
+  const add = (value: string): void => {
+    const normalized = normalizeIdentifierToken(value);
+    if (normalized) candidates.add(normalized);
+  };
+
+  add(resource.kind);
+  add(resource.plural);
+  add(singularizeIdentifier(resource.plural));
+
+  return Array.from(candidates);
+}
+
+function buildResourceEqlQueries(resource: ParsedKind): string[] {
+  const groupToken = normalizeIdentifierToken(resource.group);
+  const versionToken = normalizeIdentifierToken(resource.version);
+  if (!groupToken || !versionToken) return [];
+
+  const kinds = buildKindCandidates(resource);
+  return kinds.map((kindToken) => `.namespace.resources.cr.${groupToken}.${versionToken}.${kindToken} limit ${INSTANCE_EQL_QUERY_LIMIT}`);
+}
+
+async function fetchEqlItems(query: string, token: string): Promise<Array<Record<string, unknown>>> {
+  const params = new URLSearchParams({ query });
+  const response = await fetch(`/core/query/v1/eql?${params.toString()}`, {
+    headers: {
+      Authorization: `Bearer ${token}`,
+    },
+    credentials: 'same-origin',
+  });
+  if (!response.ok) return [];
+  const payload = await response.json();
+  return extractObjectArray(payload);
+}
+
+function addSearchTerm(out: Set<string>, raw: string): void {
+  if (out.size >= 140) return;
+  const value = raw.trim().toLowerCase();
+  if (!value || value.length > 120) return;
+  out.add(value);
+  if (out.size >= 140) return;
+  const compact = value.replace(/[^a-z0-9]+/g, '');
+  if (compact && compact !== value) out.add(compact);
+}
+
+function collectSearchTerms(value: unknown, out: Set<string>, depth = 0): void {
+  if (out.size >= 140 || value == null || depth > 4) return;
+
+  if (typeof value === 'string') {
+    addSearchTerm(out, value);
+    return;
+  }
+  if (typeof value === 'number' || typeof value === 'boolean') {
+    addSearchTerm(out, String(value));
+    return;
+  }
+  if (Array.isArray(value)) {
+    for (const entry of value.slice(0, 40)) {
+      collectSearchTerms(entry, out, depth + 1);
+      if (out.size >= 140) return;
+    }
+    return;
+  }
+  if (typeof value !== 'object') return;
+
+  const record = value as Record<string, unknown>;
+  let keyCount = 0;
+  for (const [key, entry] of Object.entries(record)) {
+    keyCount += 1;
+    if (keyCount > 80) break;
+    if (key) addSearchTerm(out, key);
+    collectSearchTerms(entry, out, depth + 1);
+    if (out.size >= 140) return;
+  }
+}
+
+function extractInstanceSearchText(item: Record<string, unknown>): string {
+  const terms = new Set<string>();
+  collectSearchTerms(item, terms);
+  const result = Array.from(terms).join(' ');
+  if (result.length <= 2200) return result;
+  return result.slice(0, 2200);
+}
+
+function resourcePriority(resource: ParsedKind): number {
+  const key = `${resource.group}/${resource.plural}`.toLowerCase();
+  if (key.includes('fabric')) return 0;
+  if (key.includes('interface')) return 1;
+  if (key.includes('bgp')) return 2;
+  if (key.includes('topolog')) return 3;
+  if (key.includes('node')) return 4;
+  if (!resource.namespaced) return 5;
+  return 6;
+}
+
+async function fetchResourceInstances(resource: ParsedKind, token: string): Promise<Array<Record<string, unknown>>> {
+  const queries = buildResourceEqlQueries(resource);
+  for (const query of queries) {
+    const objects = await fetchEqlItems(query, token).catch(() => []);
+    if (objects.length > 0) return objects;
+  }
+  return [];
+}
+
+async function fetchInstanceItems(resources: ParsedKind[], token: string): Promise<ParsedKind[]> {
+  const uniqueResources = new Map<string, ParsedKind>();
+
+  for (const resource of resources) {
+    if (resource.isWorkflow || resource.isInstance) continue;
+    const key = `${resource.group}/${resource.version}/${resource.plural}`;
+    if (!uniqueResources.has(key)) {
+      uniqueResources.set(key, resource);
+    }
+  }
+
+  const sortedResources = Array.from(uniqueResources.values()).sort((a, b) => {
+    const pa = resourcePriority(a);
+    const pb = resourcePriority(b);
+    if (pa !== pb) return pa - pb;
+    return `${a.group}/${a.plural}`.localeCompare(`${b.group}/${b.plural}`);
+  });
+  const resourcesToFetch = sortedResources.slice(0, INSTANCE_RESOURCE_LIMIT);
+
+  const out: ParsedKind[] = [];
+  const seen = new Set<string>();
+  let index = 0;
+
+  async function worker(): Promise<void> {
+    while (out.length < INSTANCE_TOTAL_LIMIT && index < resourcesToFetch.length) {
+      const resource = resourcesToFetch[index++];
+      const objects = (await fetchResourceInstances(resource, token))
+        .slice(0, INSTANCE_ITEMS_PER_RESOURCE);
+      for (const object of objects) {
+        const instanceName = extractItemName(object);
+        if (!instanceName) continue;
+        const objectNamespace = extractItemNamespace(object);
+        const key = `${resource.group}/${resource.version}/${resource.plural}/${objectNamespace}/${instanceName}`;
+        if (seen.has(key)) continue;
+        seen.add(key);
+        out.push({
+          plural: resource.plural,
+          kind: resource.kind,
+          label: instanceName,
+          category: resource.category,
+          panel: resource.panel,
+          group: resource.group,
+          version: resource.version,
+          namespaced: resource.namespaced,
+          isWorkflow: false,
+          isInstance: true,
+          instanceName,
+          instanceNamespace: objectNamespace || undefined,
+          instanceSearchText: extractInstanceSearchText(object),
+        });
+        if (out.length >= INSTANCE_TOTAL_LIMIT) break;
+      }
+    }
+  }
+
+  const workers = Array.from({ length: INSTANCE_FETCH_CONCURRENCY }, () => worker());
+  await Promise.all(workers);
+  return out;
+}
+
 async function fetchGroupItems(groupName: string, version: string, token: string): Promise<ParsedKind[]> {
   const encodedGroup = encodeURIComponent(groupName);
   const encodedVersion = encodeURIComponent(version);
@@ -210,20 +453,19 @@ async function fetchGroupItems(groupName: string, version: string, token: string
     const kind = typeof item.kind === 'string' && item.kind ? item.kind : plural;
     const namespaced = Boolean(item.namespaced);
 
-    const access = checkAccess(openApiPaths, groupName, version, plural, namespaced, false);
-    if (access !== 'None') {
-      out.push({
-        plural,
-        kind,
-        label: kind,
-        category: '',
-        panel: 'main',
-        group: groupName,
-        version,
-        namespaced,
-        isWorkflow: false,
-      });
-    }
+    // Keep all discovered resources searchable, even when OpenAPI access
+    // metadata is incomplete or does not expose a GET path for this target.
+    out.push({
+      plural,
+      kind,
+      label: kind,
+      category: '',
+      panel: 'main',
+      group: groupName,
+      version,
+      namespaced,
+      isWorkflow: false,
+    });
 
     const workflowAccess = checkAccess(openApiPaths, groupName, version, plural, namespaced, true);
     if (workflowAccess !== 'None') {
@@ -257,29 +499,42 @@ async function fetchAllResources(force: boolean): Promise<void> {
 
   state.fetching = true;
   try {
-    const appsRaw = await fetchJson('/apps', state.token);
-    const groups = (
+    const tokenAtFetchStart = state.token;
+    const appsRaw = await fetchJson('/apps', tokenAtFetchStart);
+    const groupsRaw = (
       appsRaw && typeof appsRaw === 'object'
         ? (appsRaw as { groups?: unknown }).groups
         : []
     );
-    if (!Array.isArray(groups)) {
+    if (!Array.isArray(groupsRaw)) {
       throw new Error('Unexpected /apps response');
     }
 
-    const groupResults = await Promise.all(groups.map(async (groupRaw) => {
-      if (!groupRaw || typeof groupRaw !== 'object') return [];
-      const group = groupRaw as AppsGroup;
+    const groups = groupsRaw
+      .filter((groupRaw): groupRaw is AppsGroup => Boolean(groupRaw) && typeof groupRaw === 'object');
+
+    const groupResults = await Promise.all(groups.map(async (group) => {
       const groupName = typeof group.name === 'string' ? group.name : '';
       const version = pickVersion(group);
       if (!groupName || !version) return [];
-      return fetchGroupItems(groupName, version, state.token).catch(() => []);
+      return fetchGroupItems(groupName, version, tokenAtFetchStart).catch(() => []);
     }));
 
     const flattened = groupResults.flat();
     state.cachedItems = flattened;
     state.lastFetchTs = Date.now();
     post(APPS_RESPONSE_MSG, { data: flattened });
+
+    void (async () => {
+      const instanceItems = await fetchInstanceItems(flattened, tokenAtFetchStart).catch(() => []);
+      if (instanceItems.length === 0) return;
+      const latestState = getState();
+      if (latestState.token !== tokenAtFetchStart) return;
+      const merged = [...flattened, ...instanceItems];
+      latestState.cachedItems = merged;
+      latestState.lastFetchTs = Date.now();
+      post(APPS_RESPONSE_MSG, { data: merged, enriched: true });
+    })();
   } catch (err) {
     post(APPS_RESPONSE_MSG, {
       data: state.cachedItems,
