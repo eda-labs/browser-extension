@@ -38,7 +38,7 @@ async function loadEnvFile(envFilePath) {
     content = await fs.readFile(envFilePath, 'utf8');
   } catch (err) {
     if (err && typeof err === 'object' && 'code' in err && err.code === 'ENOENT') {
-      throw new Error(`Missing env file: ${envFilePath}`);
+      throw new Error(`Missing env file: ${envFilePath}`, { cause: err });
     }
     throw err;
   }

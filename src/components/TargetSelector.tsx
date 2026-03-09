@@ -36,8 +36,8 @@ export function TargetSelector({
             notched
             renderValue={(val) => {
               if (!val) return <Typography sx={{ color: 'text.secondary', fontSize: 'inherit' }}>Select a target...</Typography>;
-              const t = targets.find((t) => t.id === val);
-              return t ? t.edaUrl : '';
+              const target = targets.find((candidate) => candidate.id === val);
+              return target ? target.edaUrl : '';
             }}
           >
             {targets.map((t) => (

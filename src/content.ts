@@ -55,23 +55,27 @@ api.runtime.onMessage.addListener((message, _sender, sendResponse) => {
   const headers = (message.headers as Record<string, string> | undefined) ?? undefined;
   const body = typeof message.body === 'string' ? message.body : undefined;
 
-  void fetch(url, {
-    method,
-    headers,
-    body,
-  }).then(async (res) => {
-    sendResponse({
-      ok: res.ok,
-      status: res.status,
-      body: await res.text(),
-    });
-  }).catch((err) => {
-    sendResponse({
-      ok: false,
-      status: 0,
-      body: getErrorMessage(err),
-    });
-  });
+  void (async () => {
+    try {
+      const res = await fetch(url, {
+        method,
+        headers,
+        body,
+      });
+
+      sendResponse({
+        ok: res.ok,
+        status: res.status,
+        body: await res.text(),
+      });
+    } catch (error) {
+      sendResponse({
+        ok: false,
+        status: 0,
+        body: getErrorMessage(error),
+      });
+    }
+  })();
 
   return true;
 });
@@ -127,12 +131,15 @@ function initEdaFeatures(): void {
   ensureKeepalive();
   if (spotlightInitialized) return;
   spotlightInitialized = true;
-  void import('./spotlight').then(({ injectSpotlightInterceptor, initSpotlight }) => {
-    injectSpotlightInterceptor();
-    initSpotlight();
-  }).catch(() => {
-    spotlightInitialized = false;
-  });
+  void (async () => {
+    try {
+      const { injectSpotlightInterceptor, initSpotlight } = await import('./spotlight');
+      injectSpotlightInterceptor();
+      initSpotlight();
+    } catch {
+      spotlightInitialized = false;
+    }
+  })();
 }
 
 if (document.readyState === 'loading') {
