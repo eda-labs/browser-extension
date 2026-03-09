@@ -5,6 +5,8 @@ const EQL_RESPONSE_MSG = 'eda-ext-eql-response';
 const EQL_AUTOCOMPLETE_REQUEST_MSG = 'eda-ext-eql-autocomplete-request';
 const EQL_AUTOCOMPLETE_RESPONSE_MSG = 'eda-ext-eql-autocomplete-response';
 const BRIDGE_READY_MSG = 'eda-ext-bridge-ready';
+const EDA_REQUEST_MSG = 'eda-request';
+const EDA_RESPONSE_MSG = 'eda-response';
 
 interface ParsedKind {
   plural: string;
@@ -30,7 +32,6 @@ interface AppsGroup {
 
 type SpotlightWindow = Window & {
   __edaExtSpotlightState?: {
-    token: string;
     cachedItems: ParsedKind[];
     lastFetchTs: number;
     fetching: boolean;
@@ -43,6 +44,15 @@ const INSTANCE_ITEMS_PER_RESOURCE = 250;
 const INSTANCE_FETCH_CONCURRENCY = 6;
 const INSTANCE_TOTAL_LIMIT = 8000;
 const INSTANCE_EQL_QUERY_LIMIT = 1000;
+const EDA_REQUEST_TIMEOUT_MS = 15_000;
+
+let edaReqCounter = 0;
+
+interface EdaResponsePayload {
+  ok: boolean;
+  status: number;
+  body: unknown;
+}
 
 function post(type: string, payload: Record<string, unknown>): void {
   window.postMessage({ type, ...payload }, '*');
@@ -52,7 +62,6 @@ function getState(): NonNullable<SpotlightWindow['__edaExtSpotlightState']> {
   const w = window as SpotlightWindow;
   if (!w.__edaExtSpotlightState) {
     w.__edaExtSpotlightState = {
-      token: '',
       cachedItems: [],
       lastFetchTs: 0,
       fetching: false,
@@ -101,80 +110,64 @@ function checkAccess(
   return access;
 }
 
-function toHeadersList(headers: HeadersInit | undefined): Array<[string, string]> {
-  if (!headers) return [];
-  if (headers instanceof Headers) {
-    const out: Array<[string, string]> = [];
-    headers.forEach((value, key) => {
-      out.push([key, value]);
-    });
-    return out;
-  }
-  if (Array.isArray(headers)) {
-    return headers
-      .map((entry) => [String(entry[0]), String(entry[1])] as [string, string]);
-  }
-  return Object.entries(headers).map(([key, value]) => [key, String(value)]);
-}
-
-function captureTokenFromHeaders(headers: HeadersInit | undefined): void {
-  const state = getState();
-  for (const [name, value] of toHeadersList(headers)) {
-    if (name.toLowerCase() !== 'authorization') continue;
-    if (!value.startsWith('Bearer ')) continue;
-    const token = value.slice(7).trim();
-    if (!token) continue;
-    if (token === state.token) return;
-    state.token = token;
-    state.cachedItems = [];
-    state.lastFetchTs = 0;
-    void fetchAllResources(true);
-    return;
+function parseResponseBody(body: unknown): unknown {
+  if (typeof body !== 'string') return body;
+  try {
+    return JSON.parse(body);
+  } catch {
+    return body;
   }
 }
 
-function patchXhr(): void {
-  const proto = XMLHttpRequest.prototype as unknown as {
-    setRequestHeader: (name: string, value: string) => void;
-    __edaExtSpotlightPatched?: boolean;
-  };
-
-  if (proto.__edaExtSpotlightPatched) return;
-
-  const originalSetRequestHeader = proto.setRequestHeader;
-  proto.setRequestHeader = function patchedSetRequestHeader(name: string, value: string): void {
-    captureTokenFromHeaders([[name, value]]);
-    originalSetRequestHeader.call(this, name, value);
-  };
-  proto.__edaExtSpotlightPatched = true;
+function nextEdaRequestId(): string {
+  edaReqCounter += 1;
+  return `eda-ext-spotlight-${Date.now()}-${edaReqCounter}`;
 }
 
-function patchFetch(): void {
-  const w = window as Window & { __edaExtSpotlightFetchPatched?: boolean };
-  if (w.__edaExtSpotlightFetchPatched) return;
+function sendEdaRequest(path: string, method = 'GET', body?: string): Promise<EdaResponsePayload> {
+  const id = nextEdaRequestId();
+  return new Promise((resolve, reject) => {
+    const onMessage = (event: MessageEvent): void => {
+      if (event.source !== window) return;
+      if (!event.data || typeof event.data !== 'object') return;
+      const data = event.data as Record<string, unknown>;
+      if (data.type !== EDA_RESPONSE_MSG) return;
+      if (data.id !== id) return;
+      cleanup();
+      resolve({
+        ok: Boolean(data.ok),
+        status: typeof data.status === 'number' ? data.status : 0,
+        body: data.body,
+      });
+    };
 
-  const originalFetch = window.fetch.bind(window);
-  window.fetch = function patchedFetch(input: RequestInfo | URL, init?: RequestInit): Promise<Response> {
-    captureTokenFromHeaders(init?.headers);
-    if (input instanceof Request) {
-      captureTokenFromHeaders(input.headers);
-    }
-    return originalFetch(input, init);
-  };
-  w.__edaExtSpotlightFetchPatched = true;
-}
+    const timeoutId = window.setTimeout(() => {
+      cleanup();
+      reject(new Error(`EDA request timed out (${method} ${path})`));
+    }, EDA_REQUEST_TIMEOUT_MS);
 
-async function fetchJson(url: string, token: string): Promise<unknown> {
-  const response = await fetch(url, {
-    headers: {
-      Authorization: `Bearer ${token}`,
-    },
-    credentials: 'same-origin',
+    const cleanup = (): void => {
+      window.clearTimeout(timeoutId);
+      window.removeEventListener('message', onMessage);
+    };
+
+    window.addEventListener('message', onMessage);
+    window.postMessage({
+      type: EDA_REQUEST_MSG,
+      id,
+      path,
+      method,
+      body,
+    }, '*');
   });
+}
+
+async function fetchJson(url: string): Promise<unknown> {
+  const response = await sendEdaRequest(url, 'GET');
   if (!response.ok) {
     throw new Error(`${url} failed (${response.status})`);
   }
-  return response.json();
+  return parseResponseBody(response.body);
 }
 
 function pickVersion(group: AppsGroup): string | null {
@@ -281,16 +274,11 @@ function buildResourceEqlQueries(resource: ParsedKind): string[] {
   return kinds.map((kindToken) => `.namespace.resources.cr.${groupToken}.${versionToken}.${kindToken} limit ${INSTANCE_EQL_QUERY_LIMIT}`);
 }
 
-async function fetchEqlItems(query: string, token: string): Promise<Array<Record<string, unknown>>> {
+async function fetchEqlItems(query: string): Promise<Array<Record<string, unknown>>> {
   const params = new URLSearchParams({ query });
-  const response = await fetch(`/core/query/v1/eql?${params.toString()}`, {
-    headers: {
-      Authorization: `Bearer ${token}`,
-    },
-    credentials: 'same-origin',
-  });
+  const response = await sendEdaRequest(`/core/query/v1/eql?${params.toString()}`, 'GET');
   if (!response.ok) return [];
-  const payload = await response.json();
+  const payload = parseResponseBody(response.body);
   return extractObjectArray(payload);
 }
 
@@ -354,16 +342,16 @@ function resourcePriority(resource: ParsedKind): number {
   return 6;
 }
 
-async function fetchResourceInstances(resource: ParsedKind, token: string): Promise<Array<Record<string, unknown>>> {
+async function fetchResourceInstances(resource: ParsedKind): Promise<Array<Record<string, unknown>>> {
   const queries = buildResourceEqlQueries(resource);
   for (const query of queries) {
-    const objects = await fetchEqlItems(query, token).catch(() => []);
+    const objects = await fetchEqlItems(query).catch(() => []);
     if (objects.length > 0) return objects;
   }
   return [];
 }
 
-async function fetchInstanceItems(resources: ParsedKind[], token: string): Promise<ParsedKind[]> {
+async function fetchInstanceItems(resources: ParsedKind[]): Promise<ParsedKind[]> {
   const uniqueResources = new Map<string, ParsedKind>();
 
   for (const resource of resources) {
@@ -389,7 +377,7 @@ async function fetchInstanceItems(resources: ParsedKind[], token: string): Promi
   async function worker(): Promise<void> {
     while (out.length < INSTANCE_TOTAL_LIMIT && index < resourcesToFetch.length) {
       const resource = resourcesToFetch[index++];
-      const objects = (await fetchResourceInstances(resource, token))
+      const objects = (await fetchResourceInstances(resource))
         .slice(0, INSTANCE_ITEMS_PER_RESOURCE);
       for (const object of objects) {
         const instanceName = extractItemName(object);
@@ -423,13 +411,13 @@ async function fetchInstanceItems(resources: ParsedKind[], token: string): Promi
   return out;
 }
 
-async function fetchGroupItems(groupName: string, version: string, token: string): Promise<ParsedKind[]> {
+async function fetchGroupItems(groupName: string, version: string): Promise<ParsedKind[]> {
   const encodedGroup = encodeURIComponent(groupName);
   const encodedVersion = encodeURIComponent(version);
 
   const [resourceListRaw, openApiRaw] = await Promise.all([
-    fetchJson(`/apps/${encodedGroup}/${encodedVersion}`, token).catch(() => null),
-    fetchJson(`/openapi/v3/apps/${encodedGroup}/${encodedVersion}`, token).catch(() => null),
+    fetchJson(`/apps/${encodedGroup}/${encodedVersion}`).catch(() => null),
+    fetchJson(`/openapi/v3/apps/${encodedGroup}/${encodedVersion}`).catch(() => null),
   ]);
 
   if (!resourceListRaw || typeof resourceListRaw !== 'object') return [];
@@ -488,7 +476,6 @@ async function fetchGroupItems(groupName: string, version: string, token: string
 async function fetchAllResources(force: boolean): Promise<void> {
   const state = getState();
 
-  if (!state.token) return;
   if (state.fetching) return;
 
   const now = Date.now();
@@ -499,8 +486,7 @@ async function fetchAllResources(force: boolean): Promise<void> {
 
   state.fetching = true;
   try {
-    const tokenAtFetchStart = state.token;
-    const appsRaw = await fetchJson('/apps', tokenAtFetchStart);
+    const appsRaw = await fetchJson('/apps');
     const groupsRaw = (
       appsRaw && typeof appsRaw === 'object'
         ? (appsRaw as { groups?: unknown }).groups
@@ -517,7 +503,7 @@ async function fetchAllResources(force: boolean): Promise<void> {
       const groupName = typeof group.name === 'string' ? group.name : '';
       const version = pickVersion(group);
       if (!groupName || !version) return [];
-      return fetchGroupItems(groupName, version, tokenAtFetchStart).catch(() => []);
+      return fetchGroupItems(groupName, version).catch(() => []);
     }));
 
     const flattened = groupResults.flat();
@@ -526,10 +512,9 @@ async function fetchAllResources(force: boolean): Promise<void> {
     post(APPS_RESPONSE_MSG, { data: flattened });
 
     void (async () => {
-      const instanceItems = await fetchInstanceItems(flattened, tokenAtFetchStart).catch(() => []);
+      const instanceItems = await fetchInstanceItems(flattened).catch(() => []);
       if (instanceItems.length === 0) return;
       const latestState = getState();
-      if (latestState.token !== tokenAtFetchStart) return;
       const merged = [...flattened, ...instanceItems];
       latestState.cachedItems = merged;
       latestState.lastFetchTs = Date.now();
@@ -546,26 +531,15 @@ async function fetchAllResources(force: boolean): Promise<void> {
 }
 
 async function runEqlQuery(query: string, reqId: number): Promise<void> {
-  const state = getState();
-  if (!state.token) {
-    post(EQL_RESPONSE_MSG, { reqId, error: 'Waiting for EDA auth token' });
-    return;
-  }
-
   try {
     const params = new URLSearchParams({ query });
-    const response = await fetch(`/core/query/v1/eql?${params.toString()}`, {
-      headers: {
-        Authorization: `Bearer ${state.token}`,
-      },
-      credentials: 'same-origin',
-    });
+    const response = await sendEdaRequest(`/core/query/v1/eql?${params.toString()}`, 'GET');
 
     if (!response.ok) {
       throw new Error(`EQL query failed (${response.status})`);
     }
 
-    const data = await response.json();
+    const data = parseResponseBody(response.body);
     post(EQL_RESPONSE_MSG, { reqId, data });
   } catch (err) {
     post(EQL_RESPONSE_MSG, {
@@ -576,29 +550,18 @@ async function runEqlQuery(query: string, reqId: number): Promise<void> {
 }
 
 async function runEqlAutocomplete(query: string, reqId: number, completionLimit: number): Promise<void> {
-  const state = getState();
-  if (!state.token) {
-    post(EQL_AUTOCOMPLETE_RESPONSE_MSG, { reqId, error: 'Waiting for EDA auth token' });
-    return;
-  }
-
   try {
     const params = new URLSearchParams({
       query,
       completion_limit: String(completionLimit > 0 ? completionLimit : 10),
     });
-    const response = await fetch(`/core/query/v1/eql/autocomplete?${params.toString()}`, {
-      headers: {
-        Authorization: `Bearer ${state.token}`,
-      },
-      credentials: 'same-origin',
-    });
+    const response = await sendEdaRequest(`/core/query/v1/eql/autocomplete?${params.toString()}`, 'GET');
 
     if (!response.ok) {
       throw new Error(`EQL autocomplete failed (${response.status})`);
     }
 
-    const data = await response.json();
+    const data = parseResponseBody(response.body);
     post(EQL_AUTOCOMPLETE_RESPONSE_MSG, { reqId, data });
   } catch (err) {
     post(EQL_AUTOCOMPLETE_RESPONSE_MSG, {
@@ -635,7 +598,5 @@ function setupMessageBridge(): void {
   });
 }
 
-patchXhr();
-patchFetch();
 setupMessageBridge();
 post(BRIDGE_READY_MSG, { ok: true });
