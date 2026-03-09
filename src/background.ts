@@ -11,6 +11,8 @@ import { tabIdByOrigin, tabOpenedAtByOrigin, doDirectFetch, doTabFetchFallback, 
 import { decodeJwtExp, fetchToken, fetchClientSecret } from './core/auth';
 import { initKeepalive, stopKeepalive } from './core/keepalive';
 
+const SPOTLIGHT_REQUEST_CHANNEL = 'eda-ext-spotlight-request';
+
 let state: EdaState = {
   status: 'disconnected',
   edaUrl: '',
@@ -25,6 +27,60 @@ let state: EdaState = {
 };
 
 initKeepalive();
+
+function normalizeOrigin(value: string): string {
+  try {
+    return new URL(value).origin;
+  } catch {
+    return '';
+  }
+}
+
+function normalizeOriginList(value: unknown): string[] {
+  if (!Array.isArray(value)) return [];
+  const out = new Set<string>();
+  for (const entry of value) {
+    if (typeof entry !== 'string') continue;
+    const origin = normalizeOrigin(entry);
+    if (origin) out.add(origin);
+  }
+  return Array.from(out);
+}
+
+async function isAuthorizedRequestOrigin(originRaw: string): Promise<boolean> {
+  const requestOrigin = normalizeOrigin(originRaw);
+  if (!requestOrigin) return false;
+
+  const activeTargetOrigin = normalizeOrigin(state.edaUrl);
+  if (activeTargetOrigin && requestOrigin === activeTargetOrigin) {
+    return true;
+  }
+
+  const stored = await api.storage.local.get(['allowedRequestOrigins']);
+  const allowedOrigins = normalizeOriginList(stored.allowedRequestOrigins);
+  return allowedOrigins.includes(requestOrigin);
+}
+
+function isInternalEdaUiRequest(
+  senderUrlRaw: string,
+  requestOriginRaw: string,
+  channelRaw: string,
+): boolean {
+  const senderOrigin = normalizeOrigin(senderUrlRaw);
+  const requestOrigin = normalizeOrigin(requestOriginRaw);
+  if (!senderOrigin || !requestOrigin || senderOrigin !== requestOrigin) {
+    return false;
+  }
+  if (channelRaw !== SPOTLIGHT_REQUEST_CHANNEL) {
+    return false;
+  }
+  try {
+    const senderUrl = new URL(senderUrlRaw);
+    return senderUrl.pathname.startsWith('/ui/');
+  } catch {
+    return false;
+  }
+}
 
 function persistStatus(): void {
   void api.storage.local.set({
@@ -51,8 +107,16 @@ function notifyTabs(): void {
   }
 }
 
+function canRefreshSession(): boolean {
+  return Boolean(state.refreshToken && state.clientSecret);
+}
+
 function scheduleRefresh(): void {
   if (state.refreshTimerId) clearTimeout(state.refreshTimerId);
+  if (!canRefreshSession()) {
+    state.refreshTimerId = null;
+    return;
+  }
   const delay = Math.max(0, state.accessTokenExpiresAt - Date.now() - 30000);
   state.refreshTimerId = setTimeout(() => void refreshAccessToken(), delay);
 }
@@ -124,7 +188,6 @@ async function connect(
 
     await api.storage.local.set({
       edaUrl,
-      clientSecret,
       accessToken: state.accessToken,
       refreshToken: state.refreshToken,
       accessTokenExpiresAt: state.accessTokenExpiresAt,
@@ -139,6 +202,7 @@ async function connect(
     state.status = 'error';
     state.accessToken = null;
     state.refreshToken = null;
+    state.clientSecret = null;
     state.activeTargetId = null;
     await api.storage.local.set({
       connectionStatus: state.status,
@@ -170,14 +234,14 @@ function disconnect(): void {
 async function restoreSession(): Promise<void> {
   const stored = await api.storage.local.get([
     'edaUrl', 'clientSecret', 'accessToken', 'refreshToken', 'accessTokenExpiresAt', 'activeTargetId',
-  ]) as StoredConfig & { activeTargetId?: string };
+  ]) as StoredConfig & { activeTargetId?: string; clientSecret?: string };
 
-  if (!stored.accessToken || !stored.refreshToken || !stored.edaUrl || !stored.clientSecret) return;
+  if (!stored.accessToken || !stored.edaUrl) return;
 
   state.edaUrl = stored.edaUrl;
-  state.clientSecret = stored.clientSecret;
+  state.clientSecret = typeof stored.clientSecret === 'string' ? stored.clientSecret : null;
   state.accessToken = stored.accessToken;
-  state.refreshToken = stored.refreshToken;
+  state.refreshToken = typeof stored.refreshToken === 'string' ? stored.refreshToken : null;
   state.accessTokenExpiresAt = stored.accessTokenExpiresAt ?? 0;
   state.activeTargetId = stored.activeTargetId ?? null;
 
@@ -186,30 +250,41 @@ async function restoreSession(): Promise<void> {
   const activeTarget = targets.find((t) => t.id === state.activeTargetId);
   if (activeTarget) {
     state.username = activeTarget.username;
-    state.password = activeTarget.password;
   }
 
   if (Date.now() < state.accessTokenExpiresAt) {
     state.status = 'connected';
     scheduleRefresh();
   } else {
-    await refreshAccessToken();
-    if (state.accessToken) {
-      state.status = 'connected';
+    if (!canRefreshSession()) {
+      disconnect();
+      return;
     }
+    await refreshAccessToken();
+    if (!state.accessToken) return;
+    state.status = 'connected';
   }
   persistStatus();
 }
 
 async function migrateStorage(): Promise<void> {
   const stored = await api.storage.local.get(['edaUrl', 'targets']);
+  if (Array.isArray(stored.targets)) {
+    const normalizedTargets = stored.targets
+      .filter((entry): entry is Record<string, unknown> => Boolean(entry) && typeof entry === 'object')
+      .map((entry) => ({
+        id: typeof entry.id === 'string' ? entry.id : crypto.randomUUID(),
+        edaUrl: typeof entry.edaUrl === 'string' ? entry.edaUrl : '',
+        username: typeof entry.username === 'string' ? entry.username : '',
+      }))
+      .filter((target) => target.edaUrl);
+    await api.storage.local.set({ targets: normalizedTargets });
+  }
   if (stored.edaUrl && !stored.targets) {
     const target: TargetProfile = {
       id: crypto.randomUUID(),
       edaUrl: stored.edaUrl as string,
       username: '',
-      password: '',
-      clientSecret: '',
     };
     await api.storage.local.set({
       targets: [target],
@@ -231,6 +306,18 @@ async function handleRequest(
 ): Promise<ProxyResponse> {
   if (state.status !== 'connected' || !state.accessToken) {
     return { ok: false, status: 0, body: 'Not connected to EDA' };
+  }
+
+  if (Date.now() >= state.accessTokenExpiresAt) {
+    if (canRefreshSession()) {
+      await refreshAccessToken();
+    } else {
+      disconnect();
+      return { ok: false, status: 0, body: 'Session expired. Reconnect to continue.' };
+    }
+    if (state.status !== 'connected' || !state.accessToken) {
+      return { ok: false, status: 0, body: 'Session expired. Reconnect to continue.' };
+    }
   }
 
   const url = state.edaUrl.replace(/\/+$/, '') + path;
@@ -318,6 +405,19 @@ api.runtime.onMessage.addListener((message, sender, sendResponse) => {
     }
 
     if (message.type === 'eda-request') {
+      const requestOrigin = typeof message.requestOrigin === 'string' ? message.requestOrigin : '';
+      const channel = typeof message.channel === 'string' ? message.channel : '';
+      const senderUrl = sender.tab?.url ?? sender.url ?? '';
+      if (
+        !isInternalEdaUiRequest(senderUrl, requestOrigin, channel)
+        && !await isAuthorizedRequestOrigin(requestOrigin)
+      ) {
+        return {
+          ok: false,
+          status: 0,
+          body: 'Request origin is not authorized for the current EDA session',
+        };
+      }
       return handleRequest(
         message.path as string,
         message.method as string | undefined,

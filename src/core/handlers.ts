@@ -58,6 +58,8 @@ export async function handlePageMessage(event: MessageEvent): Promise<void> {
     try {
       const response = await api.runtime.sendMessage({
         type: 'eda-request',
+        requestOrigin: window.location.origin,
+        channel,
         path,
         method,
         headers,

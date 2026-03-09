@@ -1,37 +1,30 @@
-const APPS_REQUEST_MSG = 'eda-ext-fetch-apps';
-const APPS_RESPONSE_MSG = 'eda-ext-apps-response';
-const EQL_REQUEST_MSG = 'eda-ext-eql-request';
-const EQL_RESPONSE_MSG = 'eda-ext-eql-response';
-const EQL_AUTOCOMPLETE_REQUEST_MSG = 'eda-ext-eql-autocomplete-request';
-const EQL_AUTOCOMPLETE_RESPONSE_MSG = 'eda-ext-eql-autocomplete-response';
-const BRIDGE_READY_MSG = 'eda-ext-bridge-ready';
-const SPOTLIGHT_BRIDGE_CHANNEL = 'eda-ext-spotlight-bridge';
-const EDA_REQUEST_MSG = 'eda-request';
-const EDA_RESPONSE_MSG = 'eda-response';
-const EDA_REQUEST_CHANNEL = 'eda-ext-spotlight-request';
+import { getErrorMessage } from './core/utils';
+import {
+  APPS_REQUEST_MSG,
+  APPS_RESPONSE_MSG,
+  BRIDGE_READY_MSG,
+  EDA_REQUEST_CHANNEL,
+  EDA_REQUEST_MSG,
+  EDA_RESPONSE_MSG,
+  EQL_AUTOCOMPLETE_REQUEST_MSG,
+  EQL_AUTOCOMPLETE_RESPONSE_MSG,
+  EQL_REQUEST_MSG,
+  EQL_RESPONSE_MSG,
+  SPOTLIGHT_BRIDGE_CHANNEL,
+} from './spotlight/constants';
+import {
+  buildResourceEqlQueries,
+  checkAccess,
+  extractInstanceSearchText,
+  extractItemName,
+  extractItemNamespace,
+  extractObjectArray,
+  parseResponseBody,
+  resourcePriority,
+} from './spotlight/page-helpers';
+import type { AppsGroup, ParsedKind } from './spotlight/types';
+
 const PAGE_TARGET_ORIGIN = window.location.origin === 'null' ? '*' : window.location.origin;
-
-interface ParsedKind {
-  plural: string;
-  kind: string;
-  label: string;
-  category: string;
-  panel: string;
-  group: string;
-  version: string;
-  namespaced?: boolean;
-  isWorkflow?: boolean;
-  isInstance?: boolean;
-  instanceName?: string;
-  instanceNamespace?: string;
-  instanceSearchText?: string;
-}
-
-interface AppsGroup {
-  name?: string;
-  preferredVersion?: { version?: string };
-  versions?: Array<{ version?: string } | string>;
-}
 
 type SpotlightWindow = Window & {
   __edaExtSpotlightState?: {
@@ -73,54 +66,6 @@ function getState(): NonNullable<SpotlightWindow['__edaExtSpotlightState']> {
   return w.__edaExtSpotlightState;
 }
 
-function getErrorMessage(err: unknown): string {
-  if (err instanceof Error && err.message) return err.message;
-  if (typeof err === 'string') return err;
-  return 'Unknown error';
-}
-
-function checkAccess(
-  openApiPaths: Record<string, unknown>,
-  group: string,
-  version: string,
-  plural: string,
-  namespaced: boolean,
-  isWorkflow: boolean,
-): 'None' | 'Read' | 'ReadWrite' {
-  let access: 'None' | 'Read' | 'ReadWrite' = 'None';
-
-  const base = isWorkflow
-    ? `/workflows/v1/${group}/${version}/${plural}`
-    : `/apps/${group}/${version}${namespaced ? '/[^/]+' : ''}/${plural}`;
-
-  let re: RegExp;
-  try {
-    re = new RegExp(`^${base}(/.+)?$`);
-  } catch {
-    return 'None';
-  }
-
-  for (const [path, methods] of Object.entries(openApiPaths)) {
-    if (!re.test(path)) continue;
-    if (!methods || typeof methods !== 'object') continue;
-    for (const method of Object.keys(methods as Record<string, unknown>)) {
-      const normalized = method.toLowerCase();
-      if (normalized !== 'get') access = 'ReadWrite';
-      else if (access === 'None') access = 'Read';
-    }
-  }
-
-  return access;
-}
-
-function parseResponseBody(body: unknown): unknown {
-  if (typeof body !== 'string') return body;
-  try {
-    return JSON.parse(body);
-  } catch {
-    return body;
-  }
-}
 
 function nextEdaRequestId(): string {
   edaReqCounter += 1;
@@ -190,98 +135,6 @@ function pickVersion(group: AppsGroup): string | null {
   return null;
 }
 
-function extractObjectArray(data: unknown): Array<Record<string, unknown>> {
-  if (Array.isArray(data)) {
-    return data.filter((item): item is Record<string, unknown> => Boolean(item) && typeof item === 'object');
-  }
-  if (!data || typeof data !== 'object') return [];
-
-  const record = data as Record<string, unknown>;
-  for (const key of ['items', 'data', 'resources', 'results']) {
-    const candidate = record[key];
-    if (Array.isArray(candidate)) {
-      return candidate.filter((item): item is Record<string, unknown> => Boolean(item) && typeof item === 'object');
-    }
-  }
-
-  for (const value of Object.values(record)) {
-    if (!Array.isArray(value)) continue;
-    const arr = value.filter((item): item is Record<string, unknown> => Boolean(item) && typeof item === 'object');
-    if (arr.length > 0) return arr;
-  }
-
-  return [];
-}
-
-function extractItemName(item: Record<string, unknown>): string {
-  const direct = typeof item.name === 'string' ? item.name.trim() : '';
-  if (direct) return direct;
-  const metadata = item.metadata && typeof item.metadata === 'object'
-    ? item.metadata as Record<string, unknown>
-    : null;
-  const metadataName = typeof metadata?.name === 'string' ? metadata.name.trim() : '';
-  if (metadataName) return metadataName;
-  const id = typeof item.id === 'string' ? item.id.trim() : '';
-  return id;
-}
-
-function extractItemNamespace(item: Record<string, unknown>): string {
-  const direct = typeof item.namespace === 'string' ? item.namespace.trim() : '';
-  if (direct) return direct;
-  const metadata = item.metadata && typeof item.metadata === 'object'
-    ? item.metadata as Record<string, unknown>
-    : null;
-  return typeof metadata?.namespace === 'string' ? metadata.namespace.trim() : '';
-}
-
-function normalizeIdentifierToken(raw: string): string {
-  return raw
-    .replace(/([a-z0-9])([A-Z])/g, '$1_$2')
-    .replace(/[^a-zA-Z0-9]+/g, '_')
-    .replace(/^_+|_+$/g, '')
-    .toLowerCase();
-}
-
-function singularizeIdentifier(token: string): string {
-  if (token.length <= 1) return token;
-  if (token.endsWith('ies') && token.length > 3) {
-    return `${token.slice(0, -3)}y`;
-  }
-  if (token.endsWith('sses') && token.length > 4) {
-    return token.slice(0, -2);
-  }
-  if (token.endsWith('ses') && token.length > 3) {
-    return token.slice(0, -2);
-  }
-  if (token.endsWith('s') && token.length > 1) {
-    return token.slice(0, -1);
-  }
-  return token;
-}
-
-function buildKindCandidates(resource: ParsedKind): string[] {
-  const candidates = new Set<string>();
-  const add = (value: string): void => {
-    const normalized = normalizeIdentifierToken(value);
-    if (normalized) candidates.add(normalized);
-  };
-
-  add(resource.kind);
-  add(resource.plural);
-  add(singularizeIdentifier(resource.plural));
-
-  return Array.from(candidates);
-}
-
-function buildResourceEqlQueries(resource: ParsedKind): string[] {
-  const groupToken = normalizeIdentifierToken(resource.group);
-  const versionToken = normalizeIdentifierToken(resource.version);
-  if (!groupToken || !versionToken) return [];
-
-  const kinds = buildKindCandidates(resource);
-  return kinds.map((kindToken) => `.namespace.resources.cr.${groupToken}.${versionToken}.${kindToken} limit ${INSTANCE_EQL_QUERY_LIMIT}`);
-}
-
 async function fetchEqlItems(query: string): Promise<Array<Record<string, unknown>>> {
   const params = new URLSearchParams({ query });
   const response = await sendEdaRequest(`/core/query/v1/eql?${params.toString()}`, 'GET');
@@ -290,68 +143,8 @@ async function fetchEqlItems(query: string): Promise<Array<Record<string, unknow
   return extractObjectArray(payload);
 }
 
-function addSearchTerm(out: Set<string>, raw: string): void {
-  if (out.size >= 140) return;
-  const value = raw.trim().toLowerCase();
-  if (!value || value.length > 120) return;
-  out.add(value);
-  if (out.size >= 140) return;
-  const compact = value.replace(/[^a-z0-9]+/g, '');
-  if (compact && compact !== value) out.add(compact);
-}
-
-function collectSearchTerms(value: unknown, out: Set<string>, depth = 0): void {
-  if (out.size >= 140 || value == null || depth > 4) return;
-
-  if (typeof value === 'string') {
-    addSearchTerm(out, value);
-    return;
-  }
-  if (typeof value === 'number' || typeof value === 'boolean') {
-    addSearchTerm(out, String(value));
-    return;
-  }
-  if (Array.isArray(value)) {
-    for (const entry of value.slice(0, 40)) {
-      collectSearchTerms(entry, out, depth + 1);
-      if (out.size >= 140) return;
-    }
-    return;
-  }
-  if (typeof value !== 'object') return;
-
-  const record = value as Record<string, unknown>;
-  let keyCount = 0;
-  for (const [key, entry] of Object.entries(record)) {
-    keyCount += 1;
-    if (keyCount > 80) break;
-    if (key) addSearchTerm(out, key);
-    collectSearchTerms(entry, out, depth + 1);
-    if (out.size >= 140) return;
-  }
-}
-
-function extractInstanceSearchText(item: Record<string, unknown>): string {
-  const terms = new Set<string>();
-  collectSearchTerms(item, terms);
-  const result = Array.from(terms).join(' ');
-  if (result.length <= 2200) return result;
-  return result.slice(0, 2200);
-}
-
-function resourcePriority(resource: ParsedKind): number {
-  const key = `${resource.group}/${resource.plural}`.toLowerCase();
-  if (key.includes('fabric')) return 0;
-  if (key.includes('interface')) return 1;
-  if (key.includes('bgp')) return 2;
-  if (key.includes('topolog')) return 3;
-  if (key.includes('node')) return 4;
-  if (!resource.namespaced) return 5;
-  return 6;
-}
-
 async function fetchResourceInstances(resource: ParsedKind): Promise<Array<Record<string, unknown>>> {
-  const queries = buildResourceEqlQueries(resource);
+  const queries = buildResourceEqlQueries(resource, INSTANCE_EQL_QUERY_LIMIT);
   for (const query of queries) {
     const objects = await fetchEqlItems(query).catch(() => []);
     if (objects.length > 0) return objects;

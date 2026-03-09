@@ -5,9 +5,8 @@
   "description": "Allow external web apps to consume the Nokia EDA REST API. Not an official Nokia product.",
   "permissions": ["storage"],
   "host_permissions": [
-    "https://eda.dev/*",
-    "https://*.eda.dev/*",
-    "https://*/core/httpproxy/v1/keycloak/realms/eda/protocol/openid-connect/*"
+    "https://*/*",
+    "http://*/*"
   ],
   "background": {
     "scripts": ["background.js"]

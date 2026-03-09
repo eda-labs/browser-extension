@@ -55,8 +55,6 @@ function PopupApp() {
         setIsNewTarget(!!d.isNewTarget);
         setEditEdaUrl((d.edaUrl as string) ?? '');
         setEditUsername((d.username as string) ?? '');
-        setPassword((d.password as string) ?? '');
-        setClientSecret((d.clientSecret as string) ?? '');
       } else if (loadedActiveId && loadedTargets.some((t) => t.id === loadedActiveId)) {
         selectTarget(loadedTargets, loadedActiveId);
       } else if (loadedTargets.length > 0) {
@@ -84,9 +82,9 @@ function PopupApp() {
     if (!loaded.current) return;
     localStorage.setItem('draft', JSON.stringify({
       selectedTargetId, isNewTarget, edaUrl: editEdaUrl,
-      username: editUsername, password, clientSecret,
+      username: editUsername,
     }));
-  }, [selectedTargetId, isNewTarget, editEdaUrl, editUsername, password, clientSecret]);
+  }, [selectedTargetId, isNewTarget, editEdaUrl, editUsername]);
 
   function selectTarget(list: TargetProfile[], id: string) {
     const target = list.find((t) => t.id === id);
@@ -95,8 +93,8 @@ function PopupApp() {
     setIsNewTarget(false);
     setEditEdaUrl(target.edaUrl.replace(/^https?:\/\//i, ''));
     setEditUsername(target.username);
-    setPassword(target.password);
-    setClientSecret(target.clientSecret);
+    setPassword('');
+    setClientSecret('');
     setError('');
   }
 
@@ -113,7 +111,7 @@ function PopupApp() {
   async function handleSaveTarget(): Promise<TargetProfile> {
     const edaUrl = 'https://' + editEdaUrl.replace(/\/+$/, '');
     const id = edaUrl;
-    const target: TargetProfile = { id, edaUrl, username: editUsername, password, clientSecret };
+    const target: TargetProfile = { id, edaUrl, username: editUsername };
 
     const stored = await api.storage.local.get(['targets']);
     const existing = (stored.targets as TargetProfile[] | undefined) ?? [];
@@ -179,7 +177,7 @@ function PopupApp() {
         edaUrl: target.edaUrl,
         username: target.username,
         password,
-        clientSecret: target.clientSecret,
+        clientSecret,
       });
       if (result && result.ok) {
         setStatus('connected');
