@@ -1,10 +1,10 @@
 import { api } from './core/api';
-import {
-  type EdaState,
-  type StoredConfig,
-  type ConnectResult,
-  type ProxyResponse,
-  type TargetProfile,
+import type {
+  EdaState,
+  StoredConfig,
+  ConnectResult,
+  ProxyResponse,
+  TargetProfile,
 } from './core/types';
 import { getErrorMessage } from './core/utils';
 import { tabIdByOrigin, tabOpenedAtByOrigin, doDirectFetch, doTabFetchFallback, ensureTransportTab } from './core/fetch';
@@ -41,7 +41,13 @@ function notifyTabs(): void {
     edaUrl: state.edaUrl,
   };
   for (const tabId of tabIdByOrigin.values()) {
-    api.tabs.sendMessage(tabId, msg).catch(() => {});
+    void (async () => {
+      try {
+        await api.tabs.sendMessage(tabId, msg);
+      } catch {
+        // Ignore stale/unreachable tabs.
+      }
+    })();
   }
 }
 
@@ -212,6 +218,11 @@ async function migrateStorage(): Promise<void> {
   }
 }
 
+const restorePromise: Promise<void> = (async () => {
+  await migrateStorage();
+  await restoreSession();
+})();
+
 async function handleRequest(
   path: string,
   method: string | undefined,
@@ -318,10 +329,13 @@ api.runtime.onMessage.addListener((message, sender, sendResponse) => {
     return { ok: false, error: 'Unknown message type' };
   }
 
-  void restorePromise.then(() => handleMessage()).then(sendResponse).catch((err) => {
-    sendResponse({ ok: false, error: getErrorMessage(err) });
-  });
+  void (async () => {
+    try {
+      await restorePromise;
+      sendResponse(await handleMessage());
+    } catch (error) {
+      sendResponse({ ok: false, error: getErrorMessage(error) });
+    }
+  })();
   return true;
 });
-
-const restorePromise = migrateStorage().then(() => restoreSession());

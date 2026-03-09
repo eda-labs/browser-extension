@@ -11,7 +11,11 @@
     "import/no-unassigned-import": "off",
     "unicorn/no-array-sort": "off",
     "unicorn/prefer-add-event-listener": "off",
-    "no-await-in-loop": "off"
+    "no-await-in-loop": "off",
+    "@typescript-eslint/no-import-type-side-effects": "error",
+    "@typescript-eslint/no-non-null-assertion": "error",
+    "promise/prefer-await-to-then": "error",
+    "no-use-before-define": ["error", { "functions": false, "classes": true, "variables": true }]
   },
   "settings": {
     "react": {

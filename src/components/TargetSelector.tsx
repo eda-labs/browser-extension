@@ -1,5 +1,5 @@
 import { Box, FormControl, InputLabel, Select, MenuItem, Button, Typography } from '@mui/material';
-import { type ConnectionStatus, type TargetProfile } from '../core/types';
+import type { ConnectionStatus, TargetProfile } from '../core/types';
 
 interface TargetSelectorProps {
   targets: TargetProfile[];

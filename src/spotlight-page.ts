@@ -130,7 +130,14 @@ function nextEdaRequestId(): string {
 function sendEdaRequest(path: string, method = 'GET', body?: string): Promise<EdaResponsePayload> {
   const id = nextEdaRequestId();
   return new Promise((resolve, reject) => {
-    const onMessage = (event: MessageEvent): void => {
+    let timeoutId = 0;
+
+    function cleanup(): void {
+      window.clearTimeout(timeoutId);
+      window.removeEventListener('message', onMessage);
+    }
+
+    function onMessage(event: MessageEvent): void {
       if (event.source !== window) return;
       if (window.location.origin !== 'null' && event.origin !== window.location.origin) return;
       if (!event.data || typeof event.data !== 'object') return;
@@ -144,17 +151,12 @@ function sendEdaRequest(path: string, method = 'GET', body?: string): Promise<Ed
         status: typeof data.status === 'number' ? data.status : 0,
         body: data.body,
       });
-    };
+    }
 
-    const timeoutId = window.setTimeout(() => {
+    timeoutId = window.setTimeout(() => {
       cleanup();
       reject(new Error(`EDA request timed out (${method} ${path})`));
     }, EDA_REQUEST_TIMEOUT_MS);
-
-    const cleanup = (): void => {
-      window.clearTimeout(timeoutId);
-      window.removeEventListener('message', onMessage);
-    };
 
     window.addEventListener('message', onMessage);
     window.postMessage({

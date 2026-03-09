@@ -270,8 +270,10 @@ async function main() {
   }
 }
 
-main().catch((err) => {
+try {
+  await main();
+} catch (err) {
   const message = err instanceof Error ? err.message : String(err);
   console.error(`Failed to launch configured browser: ${message}`);
   process.exit(1);
-});
+}

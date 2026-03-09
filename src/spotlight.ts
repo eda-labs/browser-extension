@@ -302,6 +302,9 @@ function processEqlAutocompleteResponse(data: unknown, query: string): EqlAutoco
   return out;
 }
 
+let selectedIndex = 0;
+let filteredItems: NavItem[] = [];
+
 function setupMessageListener(): void {
   if (messageListenerSetup) return;
   messageListenerSetup = true;
@@ -621,9 +624,6 @@ function createSpotlight(): HTMLDivElement {
   overlay.prepend(style);
   return overlay;
 }
-
-let selectedIndex = 0;
-let filteredItems: NavItem[] = [];
 
 function highlightMatch(text: string, query: string): string {
   if (!query) return escapeHtml(text);
@@ -1015,6 +1015,13 @@ function sendEqlAutocompleteQuery(query: string): void {
   }, PAGE_TARGET_ORIGIN);
 }
 
+function requireElement<T extends Element>(element: T | null, selector: string): T {
+  if (!element) {
+    throw new Error(`Spotlight overlay is missing required element: ${selector}`);
+  }
+  return element;
+}
+
 function requestApps(force = false): void {
   apiLoading = true;
   if (appsRequestTimeout) {
@@ -1040,10 +1047,10 @@ function openSpotlight() {
   const overlay = createSpotlight();
   document.body.appendChild(overlay);
 
-  const input = overlay.querySelector<HTMLInputElement>('.eda-spotlight-input')!;
-  const results = overlay.querySelector<HTMLElement>('.eda-spotlight-results')!;
-  const backdrop = overlay.querySelector<HTMLElement>('.eda-spotlight-backdrop')!;
-  const countEl = overlay.querySelector<HTMLElement>('.eda-spotlight-footer-count')!;
+  const input = requireElement(overlay.querySelector<HTMLInputElement>('.eda-spotlight-input'), '.eda-spotlight-input');
+  const results = requireElement(overlay.querySelector<HTMLElement>('.eda-spotlight-results'), '.eda-spotlight-results');
+  const backdrop = requireElement(overlay.querySelector<HTMLElement>('.eda-spotlight-backdrop'), '.eda-spotlight-backdrop');
+  const countEl = requireElement(overlay.querySelector<HTMLElement>('.eda-spotlight-footer-count'), '.eda-spotlight-footer-count');
 
   selectedIndex = 0;
   let eqlMode = false;

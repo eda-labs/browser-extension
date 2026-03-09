@@ -1,5 +1,5 @@
 import { api } from './api';
-import { type ProxyResponse } from './types';
+import type { ProxyResponse } from './types';
 
 export const tabIdByOrigin = new Map<string, number>();
 export const tabOpenedAtByOrigin = new Map<string, number>();

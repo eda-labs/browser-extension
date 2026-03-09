@@ -1,5 +1,5 @@
 import { Chip, useTheme } from '@mui/material';
-import { type ConnectionStatus } from '../core/types';
+import type { ConnectionStatus } from '../core/types';
 
 const statusLabels: Record<ConnectionStatus, string> = {
   disconnected: 'Disconnected',

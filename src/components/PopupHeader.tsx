@@ -1,5 +1,5 @@
 import { Box, Typography, LinearProgress, Divider } from '@mui/material';
-import { type ConnectionStatus } from '../core/types';
+import type { ConnectionStatus } from '../core/types';
 import { StatusChip } from './StatusChip';
 
 export function PopupHeader({ status }: { status: ConnectionStatus }) {

@@ -3,7 +3,7 @@ import { createRoot } from 'react-dom/client';
 import { ThemeProvider, CssBaseline, Box, Divider } from '@mui/material';
 import theme from './theme';
 import { api } from './core/api';
-import { type ConnectionStatus, type TargetProfile } from './core/types';
+import type { ConnectionStatus, TargetProfile } from './core/types';
 import { PopupHeader } from './components/PopupHeader';
 import { TargetSelector } from './components/TargetSelector';
 import { EdaUrlField } from './components/EdaUrlField';
@@ -302,5 +302,9 @@ function PopupApp() {
   );
 }
 
-const root = createRoot(document.getElementById('root')!);
+const rootElement = document.getElementById('root');
+if (!rootElement) {
+  throw new Error('Popup root element not found');
+}
+const root = createRoot(rootElement);
 root.render(<PopupApp />);

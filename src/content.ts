@@ -80,10 +80,16 @@ api.runtime.onMessage.addListener((message, _sender, sendResponse) => {
   return true;
 });
 
-void api.runtime.sendMessage({
-  type: 'eda-tab-ready',
-  origin: location.origin,
-}).catch(() => undefined);
+void (async () => {
+  try {
+    await api.runtime.sendMessage({
+      type: 'eda-tab-ready',
+      origin: location.origin,
+    });
+  } catch {
+    // Best effort announce only.
+  }
+})();
 
 function connectKeepalive(): void {
   const port = api.runtime.connect({ name: 'eda-keepalive' });
