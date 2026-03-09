@@ -1284,7 +1284,7 @@ export function injectSpotlightInterceptor(): void {
 export function initSpotlight(): void {
 
   window.addEventListener('keydown', (e) => {
-    if ((e.ctrlKey || e.metaKey) && e.code === 'Space') {
+    if ((e.ctrlKey || e.metaKey) && e.code === 'KeyK') {
       e.preventDefault();
       e.stopPropagation();
       if (isSpotlightOpen()) {
