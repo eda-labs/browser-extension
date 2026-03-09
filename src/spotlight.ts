@@ -6,6 +6,8 @@ const APPS_REQUEST_MSG = 'eda-ext-fetch-apps';
 const APPS_RESPONSE_MSG = 'eda-ext-apps-response';
 const EQL_RESPONSE_MSG = 'eda-ext-eql-response';
 const EQL_REQUEST_MSG = 'eda-ext-eql-request';
+const EQL_AUTOCOMPLETE_RESPONSE_MSG = 'eda-ext-eql-autocomplete-response';
+const EQL_AUTOCOMPLETE_REQUEST_MSG = 'eda-ext-eql-autocomplete-request';
 const BRIDGE_READY_MSG = 'eda-ext-bridge-ready';
 
 interface NavItem {
@@ -22,6 +24,11 @@ interface EqlResult {
   path: string;
   section: string;
   fields: Record<string, unknown>;
+}
+
+interface EqlAutocompleteItem {
+  value: string;
+  suffix: string;
 }
 
 const QUICK_ACTIONS: NavItem[] = [];
@@ -198,6 +205,12 @@ let eqlLatestReqId = 0;
 let eqlResults: EqlResult[] = [];
 let eqlError = '';
 let eqlLoading = false;
+let eqlCurrentQuery = '';
+let eqlAutocompleteReqCounter = 0;
+let eqlAutocompleteLatestReqId = 0;
+let eqlAutocompleteItems: EqlAutocompleteItem[] = [];
+let eqlAutocompleteLoading = false;
+let eqlAutocompleteError = '';
 let eqlRenderCallback: (() => void) | null = null;
 let messageListenerSetup = false;
 
@@ -224,6 +237,35 @@ function processEqlResponse(data: unknown): EqlResult[] {
 
     return { label, path, section, fields: item };
   });
+}
+
+function processEqlAutocompleteResponse(data: unknown, query: string): EqlAutocompleteItem[] {
+  if (!data || typeof data !== 'object') return [];
+  const completions = Array.isArray((data as Record<string, unknown>).completions)
+    ? (data as Record<string, unknown>).completions as Array<Record<string, unknown>>
+    : [];
+
+  const out: EqlAutocompleteItem[] = [];
+  const seen = new Set<string>();
+  for (const item of completions) {
+    if (!item || typeof item !== 'object') continue;
+    const token = typeof item.token === 'string' ? item.token : '';
+    const completion = typeof item.completion === 'string' ? item.completion : '';
+    const value = token || (completion ? `${query}${completion}` : '');
+    if (!value || seen.has(value)) continue;
+    seen.add(value);
+
+    let suffix = completion;
+    if (!suffix && query && value.startsWith(query)) {
+      suffix = value.slice(query.length);
+    }
+
+    out.push({
+      value,
+      suffix: suffix || value,
+    });
+  }
+  return out;
 }
 
 function setupMessageListener(): void {
@@ -275,6 +317,23 @@ function setupMessageListener(): void {
         eqlError = '';
         eqlResults = processEqlResponse(data.data);
       }
+      if (eqlRenderCallback) eqlRenderCallback();
+      return;
+    }
+
+    if (data.type === EQL_AUTOCOMPLETE_RESPONSE_MSG) {
+      const reqId = data.reqId as number;
+      if (reqId !== eqlAutocompleteLatestReqId) return;
+      eqlAutocompleteLoading = false;
+
+      if (data.error) {
+        eqlAutocompleteError = data.error as string;
+        eqlAutocompleteItems = [];
+      } else {
+        eqlAutocompleteError = '';
+        eqlAutocompleteItems = processEqlAutocompleteResponse(data.data, eqlCurrentQuery).slice(0, 10);
+      }
+      selectedIndex = 0;
       if (eqlRenderCallback) eqlRenderCallback();
     }
   });
@@ -394,6 +453,7 @@ function createSpotlight(): HTMLDivElement {
         <span class="eda-spotlight-footer-hint"><kbd class="eda-spotlight-footer-key">&uarr;&darr;</kbd> navigate</span>
         <span class="eda-spotlight-footer-hint"><kbd class="eda-spotlight-footer-key">&crarr;</kbd> open</span>
         <span class="eda-spotlight-footer-hint"><kbd class="eda-spotlight-footer-key">.</kbd> EQL</span>
+        <span class="eda-spotlight-footer-hint"><kbd class="eda-spotlight-footer-key">tab</kbd> complete</span>
         <span class="eda-spotlight-footer-count"></span>
       </div>
     </div>
@@ -401,7 +461,15 @@ function createSpotlight(): HTMLDivElement {
 
   const style = document.createElement('style');
   style.textContent = `
-    #${SPOTLIGHT_ID} { position: fixed; inset: 0; z-index: 2147483647; display: flex; justify-content: center; padding-top: 20vh; }
+    #${SPOTLIGHT_ID} {
+      position: fixed;
+      inset: 0;
+      z-index: 2147483647;
+      display: flex;
+      justify-content: center;
+      align-items: flex-start;
+      padding: 14vh 20px 12vh 20px;
+    }
     .eda-spotlight-backdrop { position: fixed; inset: 0; background: rgba(0,0,0,0.5); }
     .eda-spotlight-panel {
       position: relative; width: 560px; max-width: 90vw; max-height: 60vh;
@@ -443,6 +511,14 @@ function createSpotlight(): HTMLDivElement {
       font-size: 12px; color: #c9ced650; overflow: hidden;
       text-overflow: ellipsis; white-space: nowrap; max-width: 200px;
     }
+    .eda-spotlight-item--autocomplete .eda-spotlight-item-label {
+      overflow: visible;
+      text-overflow: clip;
+      white-space: normal;
+      word-break: break-all;
+      font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace;
+    }
+    .eda-spotlight-item--autocomplete .eda-spotlight-item-path { display: none; }
     .eda-spotlight-empty {
       padding: 24px 16px; text-align: center; color: #c9ced680; font-size: 13px;
     }
@@ -636,38 +712,72 @@ function selectWorkflowType(meta: { group: string; version: string; plural: stri
   setTimeout(() => selectWorkflowType(meta, attempt + 1), 300);
 }
 
-function renderEqlResults(container: HTMLElement, items: EqlResult[], countEl?: HTMLElement) {
-  selectedIndex = Math.max(0, Math.min(selectedIndex, items.length - 1));
+function renderEqlResults(
+  container: HTMLElement,
+  eqlItems: EqlResult[],
+  autocompleteItems: EqlAutocompleteItem[],
+  countEl?: HTMLElement,
+  query = '',
+) {
+  selectedIndex = Math.max(0, Math.min(selectedIndex, autocompleteItems.length - 1));
 
   if (countEl) {
-    countEl.textContent = `${items.length} result${items.length !== 1 ? 's' : ''}`;
+    const resultText = `${eqlItems.length} result${eqlItems.length !== 1 ? 's' : ''}`;
+    const autocompleteText = `${autocompleteItems.length} suggestion${autocompleteItems.length !== 1 ? 's' : ''}`;
+    countEl.textContent = `${resultText} | ${autocompleteText}`;
   }
 
-  if (eqlLoading) {
-    container.innerHTML = '<div class="eda-spotlight-empty">Running EQL query...</div>';
+  if (query.length <= 1) {
+    container.innerHTML = '<div class="eda-spotlight-empty">Start typing an EQL query after the dot</div>';
+    return;
+  }
+
+  let html = '<div class="eda-spotlight-section">Autocomplete</div>';
+
+  if (eqlAutocompleteLoading && !autocompleteItems.length) {
+    html += '<div class="eda-spotlight-empty">Loading autocomplete suggestions...</div>';
+  } else if (eqlAutocompleteError) {
+    html += `<div class="eda-spotlight-empty">${escapeHtml(eqlAutocompleteError)}</div>`;
+  } else if (!autocompleteItems.length) {
+    html += '<div class="eda-spotlight-empty">No autocomplete suggestions</div>';
+  } else {
+    autocompleteItems.forEach((item, i) => {
+      html += `
+        <button class="eda-spotlight-item eda-spotlight-item--autocomplete" data-index="${i}" data-selected="${i === selectedIndex}" data-eql-autocomplete-index="${i}">
+          <span class="eda-spotlight-item-label">${escapeHtml(item.value)}</span>
+          <span class="eda-spotlight-item-path">${escapeHtml(item.suffix)}</span>
+        </button>`;
+    });
+  }
+
+  html += '<div class="eda-spotlight-section">EQL Results</div>';
+
+  if (eqlLoading && !eqlItems.length) {
+    html += '<div class="eda-spotlight-empty">Running EQL query...</div>';
+    container.innerHTML = html;
     return;
   }
 
   if (eqlError) {
-    container.innerHTML = `<div class="eda-spotlight-empty">${escapeHtml(eqlError)}</div>`;
+    html += `<div class="eda-spotlight-empty">${escapeHtml(eqlError)}</div>`;
+    container.innerHTML = html;
     return;
   }
 
-  if (items.length === 0) {
-    container.innerHTML = '<div class="eda-spotlight-empty">No results — type an EQL query after the dot</div>';
+  if (!eqlItems.length) {
+    html += '<div class="eda-spotlight-empty">No EQL results</div>';
+    container.innerHTML = html;
     return;
   }
 
-  let html = '';
   let currentSection = '';
-
-  items.forEach((item, i) => {
+  eqlItems.forEach((item, i) => {
     if (item.section !== currentSection) {
       currentSection = item.section;
       html += `<div class="eda-spotlight-section">${escapeHtml(currentSection)}</div>`;
     }
     html += `
-      <button class="eda-spotlight-item" data-index="${i}" data-selected="${i === selectedIndex}" data-eql-index="${i}">
+      <button class="eda-spotlight-item" data-index="${i}" data-selected="false" data-eql-result-index="${i}">
         <span class="eda-spotlight-item-label">${escapeHtml(item.label)}</span>
         <span class="eda-spotlight-item-path">${escapeHtml(item.path)}</span>
       </button>`;
@@ -683,6 +793,20 @@ function sendEqlQuery(query: string): void {
   eqlResults = [];
   eqlError = '';
   window.postMessage({ type: EQL_REQUEST_MSG, query, reqId: eqlLatestReqId }, '*');
+}
+
+function sendEqlAutocompleteQuery(query: string): void {
+  eqlAutocompleteReqCounter++;
+  eqlAutocompleteLatestReqId = eqlAutocompleteReqCounter;
+  eqlAutocompleteLoading = true;
+  eqlAutocompleteError = '';
+  eqlAutocompleteItems = [];
+  window.postMessage({
+    type: EQL_AUTOCOMPLETE_REQUEST_MSG,
+    query,
+    reqId: eqlAutocompleteLatestReqId,
+    completionLimit: 10,
+  }, '*');
 }
 
 function requestApps(force = false): void {
@@ -717,7 +841,10 @@ function openSpotlight() {
 
   selectedIndex = 0;
   let eqlMode = false;
-  let eqlDebounceTimer: ReturnType<typeof setTimeout> | null = null;
+  eqlCurrentQuery = '';
+  eqlAutocompleteItems = [];
+  eqlAutocompleteLoading = false;
+  eqlAutocompleteError = '';
 
   function getNavEmptyMessage(query: string): string {
     if (!bridgeReady) return 'Initializing EDA search bridge...';
@@ -750,7 +877,7 @@ function openSpotlight() {
   input.focus();
 
   function renderCurrentEql() {
-    renderEqlResults(results, eqlResults, countEl);
+    renderEqlResults(results, eqlResults, eqlAutocompleteItems, countEl, eqlCurrentQuery);
   }
 
   eqlRenderCallback = renderCurrentEql;
@@ -766,23 +893,25 @@ function openSpotlight() {
     if (raw.startsWith('.')) {
       eqlMode = true;
       input.placeholder = 'EQL query...';
-      const query = raw.trim();
+      const query = raw;
+      eqlCurrentQuery = query;
 
       if (query.length <= 1) {
         eqlResults = [];
         eqlError = '';
         eqlLoading = false;
+        eqlAutocompleteItems = [];
+        eqlAutocompleteLoading = false;
+        eqlAutocompleteError = '';
         selectedIndex = 0;
-        renderEqlResults(results, [], countEl);
+        renderEqlResults(results, [], [], countEl, query);
         return;
       }
 
-      // Debounce EQL queries (300ms)
-      if (eqlDebounceTimer) clearTimeout(eqlDebounceTimer);
-      eqlDebounceTimer = setTimeout(() => {
-        sendEqlQuery(query);
-        renderCurrentEql(); // show loading state
-      }, 300);
+      selectedIndex = 0;
+      sendEqlQuery(query);
+      sendEqlAutocompleteQuery(query);
+      renderCurrentEql();
       return;
     }
 
@@ -793,6 +922,10 @@ function openSpotlight() {
       eqlResults = [];
       eqlError = '';
       eqlLoading = false;
+      eqlCurrentQuery = '';
+      eqlAutocompleteItems = [];
+      eqlAutocompleteLoading = false;
+      eqlAutocompleteError = '';
     }
 
     renderCurrentNav(raw);
@@ -801,7 +934,13 @@ function openSpotlight() {
   function close() {
     eqlRenderCallback = null;
     appRenderCallback = null;
-    if (eqlDebounceTimer) clearTimeout(eqlDebounceTimer);
+    eqlCurrentQuery = '';
+    eqlResults = [];
+    eqlError = '';
+    eqlLoading = false;
+    eqlAutocompleteItems = [];
+    eqlAutocompleteLoading = false;
+    eqlAutocompleteError = '';
     overlay.remove();
   }
 
@@ -826,6 +965,15 @@ function openSpotlight() {
     }, 500);
   }
 
+  function applyAutocomplete(index = selectedIndex): boolean {
+    const suggestion = eqlAutocompleteItems[index];
+    if (!suggestion) return false;
+    input.value = suggestion.value;
+    input.focus();
+    filter();
+    return true;
+  }
+
   function selectCurrent() {
     if (eqlMode) {
       navigateToEql();
@@ -845,25 +993,31 @@ function openSpotlight() {
   input.addEventListener('input', filter);
 
   input.addEventListener('keydown', (e) => {
-    const maxIndex = eqlMode ? eqlResults.length - 1 : filteredItems.length - 1;
+    const maxIndex = eqlMode ? eqlAutocompleteItems.length - 1 : filteredItems.length - 1;
 
-    if (e.key === 'Escape') {
+    if (e.key === 'Tab' && eqlMode) {
+      if (applyAutocomplete()) {
+        e.preventDefault();
+      }
+    } else if (e.key === 'Escape') {
       e.preventDefault();
       close();
     } else if (e.key === 'ArrowDown') {
       e.preventDefault();
+      if (maxIndex < 0) return;
       selectedIndex = Math.min(selectedIndex + 1, maxIndex);
       if (eqlMode) {
-        renderEqlResults(results, eqlResults, countEl);
+        renderEqlResults(results, eqlResults, eqlAutocompleteItems, countEl, eqlCurrentQuery);
       } else {
         renderResults(results, filteredItems, input.value.toLowerCase().trim(), countEl);
       }
       results.querySelector('[data-selected="true"]')?.scrollIntoView({ block: 'nearest' });
     } else if (e.key === 'ArrowUp') {
       e.preventDefault();
+      if (maxIndex < 0) return;
       selectedIndex = Math.max(selectedIndex - 1, 0);
       if (eqlMode) {
-        renderEqlResults(results, eqlResults, countEl);
+        renderEqlResults(results, eqlResults, eqlAutocompleteItems, countEl, eqlCurrentQuery);
       } else {
         renderResults(results, filteredItems, input.value.toLowerCase().trim(), countEl);
       }
@@ -879,7 +1033,17 @@ function openSpotlight() {
     if (!btn) return;
 
     if (eqlMode) {
-      navigateToEql();
+      const autocompleteIdx = Number.parseInt(btn.dataset.eqlAutocompleteIndex ?? '', 10);
+      if (!Number.isNaN(autocompleteIdx)) {
+        selectedIndex = autocompleteIdx;
+        applyAutocomplete(autocompleteIdx);
+        return;
+      }
+
+      const resultIdx = Number.parseInt(btn.dataset.eqlResultIndex ?? '', 10);
+      if (!Number.isNaN(resultIdx)) {
+        navigateToEql();
+      }
       return;
     }
 

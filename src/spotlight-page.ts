@@ -2,6 +2,8 @@ const APPS_REQUEST_MSG = 'eda-ext-fetch-apps';
 const APPS_RESPONSE_MSG = 'eda-ext-apps-response';
 const EQL_REQUEST_MSG = 'eda-ext-eql-request';
 const EQL_RESPONSE_MSG = 'eda-ext-eql-response';
+const EQL_AUTOCOMPLETE_REQUEST_MSG = 'eda-ext-eql-autocomplete-request';
+const EQL_AUTOCOMPLETE_RESPONSE_MSG = 'eda-ext-eql-autocomplete-response';
 const BRIDGE_READY_MSG = 'eda-ext-bridge-ready';
 
 interface ParsedKind {
@@ -318,6 +320,39 @@ async function runEqlQuery(query: string, reqId: number): Promise<void> {
   }
 }
 
+async function runEqlAutocomplete(query: string, reqId: number, completionLimit: number): Promise<void> {
+  const state = getState();
+  if (!state.token) {
+    post(EQL_AUTOCOMPLETE_RESPONSE_MSG, { reqId, error: 'Waiting for EDA auth token' });
+    return;
+  }
+
+  try {
+    const params = new URLSearchParams({
+      query,
+      completion_limit: String(completionLimit > 0 ? completionLimit : 10),
+    });
+    const response = await fetch(`/core/query/v1/eql/autocomplete?${params.toString()}`, {
+      headers: {
+        Authorization: `Bearer ${state.token}`,
+      },
+      credentials: 'same-origin',
+    });
+
+    if (!response.ok) {
+      throw new Error(`EQL autocomplete failed (${response.status})`);
+    }
+
+    const data = await response.json();
+    post(EQL_AUTOCOMPLETE_RESPONSE_MSG, { reqId, data });
+  } catch (err) {
+    post(EQL_AUTOCOMPLETE_RESPONSE_MSG, {
+      reqId,
+      error: getErrorMessage(err),
+    });
+  }
+}
+
 function setupMessageBridge(): void {
   window.addEventListener('message', (event: MessageEvent) => {
     if (event.source !== window) return;
@@ -333,6 +368,14 @@ function setupMessageBridge(): void {
       const query = typeof data.query === 'string' ? data.query : '';
       const reqId = typeof data.reqId === 'number' ? data.reqId : 0;
       void runEqlQuery(query, reqId);
+      return;
+    }
+
+    if (data.type === EQL_AUTOCOMPLETE_REQUEST_MSG) {
+      const query = typeof data.query === 'string' ? data.query : '';
+      const reqId = typeof data.reqId === 'number' ? data.reqId : 0;
+      const completionLimit = typeof data.completionLimit === 'number' ? data.completionLimit : 10;
+      void runEqlAutocomplete(query, reqId, completionLimit);
     }
   });
 }
