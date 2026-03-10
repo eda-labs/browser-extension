@@ -207,7 +207,7 @@ async function main() {
   const extensionDir = path.resolve(process.cwd(), 'dist/chromium');
 
   await fs.access(extensionDir).catch(() => {
-    throw new Error(`Missing build output at ${extensionDir}. Run: npm run build:chromium`);
+    throw new Error(`Missing build output at ${extensionDir}. Run: pnpm run build:chromium`);
   });
   await ensureDirExists(profileDir, resetProfile);
 

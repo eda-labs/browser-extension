@@ -1,24 +1,24 @@
 ## Requirements
 
 - Node.js 18+ (recommended)
-- npm
+- pnpm
 - Firefox or Chromium-based browser (Chrome/Edge/Brave)
 
 ## Install
 
 ```bash
-npm install
+pnpm install
 ```
 
 ## Build and Run
 
-- `npm run build`: production build to `dist/`
-- `npm run watch`: rebuild on source changes
-- `npm run dev`: build and launch in Firefox via `web-ext run`
-- `npm run typecheck`: TypeScript checks (`tsc --noEmit`)
-- `npm run lint`: lint built extension with `web-ext lint`
-- `npm run package`: build + lint + create extension package
-- `npm run clean`: remove `dist/` and `web-ext-artifacts/`
+- `pnpm run build`: production build to `dist/`
+- `pnpm run watch`: rebuild on source changes
+- `pnpm run dev`: build and launch in Firefox via `web-ext run`
+- `pnpm run typecheck`: TypeScript checks (`tsc --noEmit`)
+- `pnpm run lint`: lint built extension with `web-ext lint`
+- `pnpm run package`: build + lint + create extension package
+- `pnpm run clean`: remove `dist/` and `web-ext-artifacts/`
 
 ## Dev Launcher (Chromium + .env)
 
@@ -28,7 +28,7 @@ You can start Chromium with the extension installed and pre-configured from `.en
 2. Run:
 
 ```bash
-npm run dev:chromium:env
+pnpm run dev:chromium:env
 ```
 
 Useful options:
@@ -39,7 +39,7 @@ Useful options:
 - `EDA_DIRECT_LOGIN_FALLBACK=true|false`: if Keycloak login is visible, fill and submit it directly with `EDA_USERNAME` / `EDA_PASSWORD` (default `true`).
 - `EDA_HEADLESS=true|false`: run headless (default `false`).
 - `EDA_ENV_FILE=/path/to/file`: use a custom env file path.
-- `npm run dev:chromium:env:no-build`: skip extension rebuild.
+- `pnpm run dev:chromium:env:no-build`: skip extension rebuild.
 
 ## Browser Support
 
@@ -50,17 +50,17 @@ Useful options:
 
 ## Development Workflow
 
-1. Run `npm install`.
-2. Run `npm run dev`.
+1. Run `pnpm install`.
+2. Run `pnpm run dev`.
 3. Use the popup to:
    - create/save a target,
    - connect,
    - verify status chip updates,
    - disconnect and/or delete target.
 4. Before submitting changes, run:
-   - `npm run typecheck`
-   - `npm run build`
-   - `npm run lint`
+   - `pnpm run typecheck`
+   - `pnpm run build`
+   - `pnpm run lint`
 
 ## Popup Usage
 
