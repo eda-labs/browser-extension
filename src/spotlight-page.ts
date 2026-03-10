@@ -131,14 +131,19 @@ async function sendEdaRequest(path: string, method = 'GET', body?: string): Prom
     return { ok: false, status: 0, body: 'Waiting for EDA auth token' };
   }
 
-  const response = await fetch(path, {
+  const requestInit: RequestInit = {
     method,
     headers: {
       Authorization: `Bearer ${state.token}`,
     },
-    body,
     credentials: 'same-origin',
-  });
+  };
+
+  if (body && method !== 'GET' && method !== 'HEAD') {
+    requestInit.body = body;
+  }
+
+  const response = await fetch(path, requestInit);
 
   return {
     ok: response.ok,

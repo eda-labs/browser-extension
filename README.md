@@ -29,6 +29,18 @@ If your EDA installation is using self-signed certs, or using a certificate not 
 
 ![][open-ext-screenshot]
 
+## Settings
+
+The popup now includes a settings button (gear icon) that opens extension settings in a dedicated browser tab.
+
+Current settings:
+- Target setup (EDA URL, username/password, client secret, auto-login toggle)
+- Spotlight hotkey (default: `Ctrl/Cmd + K`)
+
+Popup flow:
+- Select target
+- Connect / disconnect
+
 ## Dev Launcher (Chromium + .env)
 
 You can start Chromium with the extension installed and pre-configured from `.env`:

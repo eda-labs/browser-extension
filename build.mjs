@@ -15,8 +15,8 @@ const bgOpts = {
   bundle: true, format: 'iife', target: 'es2020',
 };
 
-const popupOpts = {
-  entryPoints: ['src/popup.tsx'],
+const uiOpts = {
+  entryPoints: ['src/popup.tsx', 'src/settings.tsx'],
   bundle: true, format: 'iife', target: 'es2020',
   jsx: 'automatic',
   define: { 'process.env.NODE_ENV': '"production"' },
@@ -38,5 +38,5 @@ for (const target of targets) {
   }
 
   await build({ ...bgOpts, outdir });
-  await build({ ...popupOpts, outdir });
+  await build({ ...uiOpts, outdir });
 }

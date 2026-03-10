@@ -166,7 +166,13 @@ function initEdaFeatures(): void {
 }
 
 if (location.pathname.startsWith('/ui/')) {
-  void ensureSpotlightInterceptor().catch(() => undefined);
+  void (async () => {
+    try {
+      await ensureSpotlightInterceptor();
+    } catch {
+      // Ignore pre-initialization failures; regular init retries.
+    }
+  })();
 }
 
 if (document.readyState === 'loading') {

@@ -17,6 +17,7 @@ interface BrowserAPI {
     connect: (connectInfo?: { name?: string }) => Port;
     sendMessage: (message: Record<string, unknown>) => Promise<Record<string, unknown>>;
     getURL: (path: string) => string;
+    openOptionsPage?: () => Promise<void>;
     onConnect: {
       addListener: (callback: (port: Port) => void) => void;
     };

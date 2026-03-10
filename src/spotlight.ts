@@ -1,5 +1,13 @@
 import { api } from './core/api';
 import {
+  DEFAULT_SPOTLIGHT_HOTKEY,
+  SPOTLIGHT_HOTKEY_STORAGE_KEY,
+  getSpotlightHotkey,
+  matchesSpotlightHotkey,
+  normalizeSpotlightHotkey,
+  type SpotlightHotkey,
+} from './core/settings';
+import {
   APPS_REQUEST_MSG,
   APPS_RESPONSE_MSG,
   BRIDGE_READY_MSG,
@@ -76,6 +84,9 @@ let eqlAutocompleteLoading = false;
 let eqlAutocompleteError = '';
 let eqlRenderCallback: (() => void) | null = null;
 let messageListenerSetup = false;
+let currentHotkey: SpotlightHotkey = DEFAULT_SPOTLIGHT_HOTKEY;
+let hotkeyListenerInitialized = false;
+let hotkeyStorageSyncInitialized = false;
 
 function processEqlResponse(data: unknown): EqlResult[] {
   if (!data || typeof data !== 'object') return [];
@@ -586,17 +597,50 @@ export function injectSpotlightInterceptor(): void {
   injectAppsFetcher();
 }
 
-export function initSpotlight(): void {
+function updateHotkeyFromStorage(rawValue: unknown): void {
+  currentHotkey = normalizeSpotlightHotkey(rawValue);
+}
 
-  window.addEventListener('keydown', (e) => {
-    if ((e.ctrlKey || e.metaKey) && e.code === 'KeyK') {
-      e.preventDefault();
-      e.stopPropagation();
-      if (isSpotlightOpen()) {
-        closeSpotlightImmediately();
-      } else {
-        openSpotlight();
-      }
+function syncHotkeyFromStorage(): void {
+  void (async () => {
+    try {
+      currentHotkey = await getSpotlightHotkey();
+    } catch {
+      currentHotkey = DEFAULT_SPOTLIGHT_HOTKEY;
     }
-  }, true);
+  })();
+}
+
+function ensureHotkeyStorageSync(): void {
+  if (hotkeyStorageSyncInitialized) return;
+  hotkeyStorageSyncInitialized = true;
+  syncHotkeyFromStorage();
+
+  api.storage.onChanged.addListener((changes, areaName) => {
+    if (areaName !== 'local') return;
+    const hotkeyChange = changes[SPOTLIGHT_HOTKEY_STORAGE_KEY];
+    if (!hotkeyChange) return;
+    updateHotkeyFromStorage(hotkeyChange.newValue);
+  });
+}
+
+function handleSpotlightHotkey(event: KeyboardEvent): void {
+  if (event.repeat) return;
+  if (!matchesSpotlightHotkey(event, currentHotkey)) return;
+
+  event.preventDefault();
+  event.stopPropagation();
+
+  if (isSpotlightOpen()) {
+    closeSpotlightImmediately();
+  } else {
+    openSpotlight();
+  }
+}
+
+export function initSpotlight(): void {
+  ensureHotkeyStorageSync();
+  if (hotkeyListenerInitialized) return;
+  hotkeyListenerInitialized = true;
+  window.addEventListener('keydown', handleSpotlightHotkey, true);
 }
