@@ -2,7 +2,7 @@
 
 - Node.js 18+ (recommended)
 - pnpm
-- Firefox or Chromium-based browser (Chrome/Edge/Brave)
+- Firefox, Chromium-based browser (Chrome/Edge/Brave), or Safari (local testing)
 
 ## Install
 
@@ -13,6 +13,7 @@ pnpm install
 ## Build and Run
 
 - `pnpm run build`: production build to `dist/`
+- `pnpm run package:safari`: create Safari zip artifact at `web-ext-artifacts/eda_browser_extension_safari.zip` (unzip before temporary install in Safari)
 - `pnpm run watch`: rebuild on source changes
 - `pnpm run dev`: build and launch in Firefox via `web-ext run`
 - `pnpm run dev:chromium`: build and launch Chromium with the extension loaded, then open the EDA URL from `.env`
@@ -34,8 +35,8 @@ Useful variables:
 
 - Runtime code is written against a `browser`/`chrome` compatible API wrapper.
 - Current development workflow is Firefox-first (`web-ext run`).
-- Current manifest is also Firefox-first (`manifest_version: 3` with `background.scripts` and `browser_specific_settings.gecko`).
-- For Chromium packaging/loading, use a Chromium-specific manifest variant (notably `background.service_worker` instead of `background.scripts`).
+- Base manifest is Firefox-first (`manifest_version: 3` with `background.scripts` and `browser_specific_settings.gecko`).
+- Chromium and Safari builds rewrite background config to `background.service_worker` and remove Firefox-only settings.
 
 ## Development Workflow
 

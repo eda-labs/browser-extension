@@ -23,6 +23,19 @@ Chrome and Edge install this extension as an unpacked directory (not by double-c
 
 Optional: for environments that allow CRX sideloading, download `eda_browser_extension.crx` from the release and install it from the extensions page.
 
+### Safari (macOS local/testing install)
+
+Safari supports temporary install from disk for local testing.
+
+1. Build Safari zip artifact: `pnpm run package:safari`.
+2. Unzip `web-ext-artifacts/eda_browser_extension_safari.zip`.
+3. Open Safari and enable web developer features (`Safari` -> `Settings` -> `Advanced`).
+4. Use Safari's temporary extension install from disk workflow and select the extracted folder (the one containing `manifest.json`).
+5. In `Safari` -> `Settings` -> `Extensions`, enable the extension and grant website access.
+
+Notes:
+- This is intended for local/testing use.
+
 ## TLS Certificates
 
 If your EDA installation is using self-signed certs, or using a certificate not trusted by your browser. Please use the 'open EDA UI' icon to navigate to the EDA UI page and accept the safety warning from the browser and trust the certificate.

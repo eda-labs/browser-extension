@@ -11,9 +11,10 @@ if (!/^\d+\.\d+\.\d+$/.test(manifestVersion)) {
 const targets = [];
 if (process.argv.includes('--firefox')) targets.push('firefox');
 if (process.argv.includes('--chromium')) targets.push('chromium');
+if (process.argv.includes('--safari')) targets.push('safari');
 
 if (!targets.length) {
-  console.error('Usage: node build.mjs --firefox | --chromium | --firefox --chromium');
+  console.error('Usage: node build.mjs [--firefox] [--chromium] [--safari]');
   process.exit(1);
 }
 
@@ -42,7 +43,7 @@ for (const target of targets) {
   const manifest = JSON.parse(readFileSync(outdir + '/manifest.json', 'utf-8'));
   manifest.version = manifestVersion;
 
-  if (target === 'chromium') {
+  if (target === 'chromium' || target === 'safari') {
     manifest.background = { service_worker: 'background.js' };
     delete manifest.browser_specific_settings;
   }

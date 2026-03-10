@@ -22,6 +22,9 @@ jobs:
       - name: Package Chromium
         run: pnpm run package:chromium
 
+      - name: Package Safari
+        run: pnpm run package:safari
+
       - name: Package Firefox (signed)
         env:
           WEB_EXT_API_KEY: ${{ secrets.WEB_EXT_API_KEY }}
