@@ -5,6 +5,8 @@ import RestartAltRoundedIcon from '@mui/icons-material/RestartAltRounded';
 import SaveRoundedIcon from '@mui/icons-material/SaveRounded';
 import SettingsSuggestRoundedIcon from '@mui/icons-material/SettingsSuggestRounded';
 import AddRoundedIcon from '@mui/icons-material/AddRounded';
+import FileUploadRoundedIcon from '@mui/icons-material/FileUploadRounded';
+import FileDownloadRoundedIcon from '@mui/icons-material/FileDownloadRounded';
 import {
   Alert,
   Box,
@@ -12,6 +14,10 @@ import {
   Chip,
   Container,
   CssBaseline,
+  Dialog,
+  DialogActions,
+  DialogContent,
+  DialogTitle,
   FormControl,
   FormControlLabel,
   IconButton,
@@ -129,20 +135,19 @@ function SettingsApp() {
   const [clientSecret, setClientSecret] = useState('');
   const [autoLogin, setAutoLogin] = useState(false);
   const [targetSaving, setTargetSaving] = useState(false);
-  const [targetError, setTargetError] = useState('');
-  const [targetMessage, setTargetMessage] = useState('');
   const [profileBusy, setProfileBusy] = useState(false);
   const [deleteDialogOpen, setDeleteDialogOpen] = useState(false);
   const [secretDialogOpen, setSecretDialogOpen] = useState(false);
   const [autoLoginDialogOpen, setAutoLoginDialogOpen] = useState(false);
   const [tlsDialogOpen, setTlsDialogOpen] = useState(false);
+  const [exportDialogOpen, setExportDialogOpen] = useState(false);
+  const [exportJson, setExportJson] = useState('');
+  const [notice, setNotice] = useState<{ severity: 'success' | 'error'; message: string } | null>(null);
 
   const [storedHotkey, setStoredHotkey] = useState<OmnisearchHotkey>(DEFAULT_OMNISEARCH_HOTKEY);
   const [draftHotkey, setDraftHotkey] = useState<OmnisearchHotkey>(DEFAULT_OMNISEARCH_HOTKEY);
   const [hotkeySaving, setHotkeySaving] = useState(false);
   const [captureMode, setCaptureMode] = useState(false);
-  const [hotkeyMessage, setHotkeyMessage] = useState('');
-  const [hotkeyError, setHotkeyError] = useState('');
 
   const [loading, setLoading] = useState(true);
   const loaded = useRef(false);
@@ -163,8 +168,8 @@ function SettingsApp() {
     setEditUsername(target.username);
     setPassword(target.password ?? '');
     setClientSecret(target.clientSecret ?? '');
-    setTargetError('');
-    setTargetMessage('');
+    setNotice(null);
+    setNotice(null);
   }
 
   function handleNewTarget(): void {
@@ -174,8 +179,8 @@ function SettingsApp() {
     setEditUsername('');
     setPassword('');
     setClientSecret('');
-    setTargetError('');
-    setTargetMessage('');
+    setNotice(null);
+    setNotice(null);
   }
 
   useEffect(() => {
@@ -322,20 +327,20 @@ function SettingsApp() {
 
       if (event.code === 'Escape') {
         setCaptureMode(false);
-        setHotkeyMessage('Hotkey capture canceled.');
+        setNotice({ severity: 'success', message: 'Hotkey capture canceled.' });
         return;
       }
 
       const captured = createHotkeyFromKeyboardEvent(event);
       if (!captured) {
-        setHotkeyError('Use one modifier key plus one regular key.');
+        setNotice({ severity: 'error', message: 'Use one modifier key plus one regular key.' });
         return;
       }
 
       setDraftHotkey(captured);
       setCaptureMode(false);
-      setHotkeyError('');
-      setHotkeyMessage(`Captured ${formatOmnisearchHotkey(captured)}. Click Save to apply.`);
+      setNotice(null);
+      setNotice({ severity: 'success', message: `Captured ${formatOmnisearchHotkey(captured)}. Click Save to apply.` });
     };
 
     window.addEventListener('keydown', onKeyDown, true);
@@ -346,12 +351,12 @@ function SettingsApp() {
 
   async function handleSaveTarget(): Promise<void> {
     setTargetSaving(true);
-    setTargetError('');
-    setTargetMessage('');
+    setNotice(null);
+    setNotice(null);
 
     if (!editEdaUrl) {
       setTargetSaving(false);
-      setTargetError('EDA URL is required.');
+      setNotice({ severity: 'error', message: 'EDA URL is required.' });
       return;
     }
 
@@ -377,9 +382,9 @@ function SettingsApp() {
       setTargets(existing);
       setSelectedTargetId(id);
       setIsNewTarget(false);
-      setTargetMessage('Target saved.');
+      setNotice({ severity: 'success', message: 'Target saved.' });
     } catch (err) {
-      setTargetError(err instanceof Error ? err.message : 'Could not save target');
+      setNotice({ severity: 'error', message: err instanceof Error ? err.message : 'Could not save target' });
     } finally {
       setTargetSaving(false);
     }
@@ -388,8 +393,8 @@ function SettingsApp() {
   async function handleDeleteTarget(): Promise<void> {
     if (!selectedTargetId) return;
     setDeleteDialogOpen(false);
-    setTargetError('');
-    setTargetMessage('');
+    setNotice(null);
+    setNotice(null);
 
     try {
       if (selectedTargetId === activeTargetId) {
@@ -407,9 +412,9 @@ function SettingsApp() {
       } else {
         handleNewTarget();
       }
-      setTargetMessage('Target deleted.');
+      setNotice({ severity: 'success', message: 'Target deleted.' });
     } catch (err) {
-      setTargetError(err instanceof Error ? err.message : 'Could not delete target');
+      setNotice({ severity: 'error', message: err instanceof Error ? err.message : 'Could not delete target' });
     }
   }
 
@@ -425,16 +430,16 @@ function SettingsApp() {
 
   async function saveHotkey(): Promise<void> {
     setHotkeySaving(true);
-    setHotkeyError('');
-    setHotkeyMessage('');
+    setNotice(null);
+    setNotice(null);
     try {
       const normalized = normalizeOmnisearchHotkey(draftHotkey);
       await setOmnisearchHotkey(normalized);
       setStoredHotkey(normalized);
       setDraftHotkey(normalized);
-      setHotkeyMessage(`Saved ${formatOmnisearchHotkey(normalized)}.`);
+      setNotice({ severity: 'success', message: `Saved ${formatOmnisearchHotkey(normalized)}.` });
     } catch (err) {
-      setHotkeyError(err instanceof Error ? err.message : 'Could not save settings');
+      setNotice({ severity: 'error', message: err instanceof Error ? err.message : 'Could not save settings' });
     } finally {
       setHotkeySaving(false);
     }
@@ -443,27 +448,25 @@ function SettingsApp() {
   function resetDraftToDefault(): void {
     setCaptureMode(false);
     setDraftHotkey(DEFAULT_OMNISEARCH_HOTKEY);
-    setHotkeyError('');
-    setHotkeyMessage('Reset to default shortcut. Click Save to apply.');
+    setNotice(null);
+    setNotice({ severity: 'success', message: 'Reset to default shortcut. Click Save to apply.' });
   }
 
   function discardHotkeyChanges(): void {
     setCaptureMode(false);
     setDraftHotkey(storedHotkey);
-    setHotkeyError('');
-    setHotkeyMessage('Discarded local changes.');
+    setNotice(null);
+    setNotice({ severity: 'success', message: 'Discarded local changes.' });
   }
 
-  async function handleExportProfile(): Promise<void> {
-    setTargetError('');
-    setTargetMessage('');
-    setProfileBusy(true);
+  function handleExportProfile(): void {
+    setNotice(null);
+    setNotice(null);
 
     try {
-      const exportedAt = new Date().toISOString();
       const profile = {
         version: 1,
-        exportedAt,
+        exportedAt: new Date().toISOString(),
         activeTargetId,
         targets: targets.map((target) => ({
           id: target.id,
@@ -476,21 +479,29 @@ function SettingsApp() {
         },
       };
 
-      const blob = new Blob([JSON.stringify(profile, null, 2)], { type: 'application/json' });
+      setExportJson(JSON.stringify(profile, null, 2));
+      setExportDialogOpen(true);
+    } catch (err) {
+      setNotice({ severity: 'error', message: err instanceof Error ? err.message : 'Could not export setup profile' });
+    }
+  }
+
+  function handleExportDownload(): void {
+    try {
+      const blob = new Blob([exportJson], { type: 'application/json' });
       const url = URL.createObjectURL(blob);
       const link = document.createElement('a');
       link.href = url;
-      link.download = `eda-setup-profile-${exportedAt.slice(0, 10)}.json`;
+      const date = JSON.parse(exportJson)?.exportedAt?.slice(0, 10) ?? 'unknown';
+      link.download = `eda-setup-profile-${date}.json`;
       document.body.appendChild(link);
       link.click();
       document.body.removeChild(link);
       URL.revokeObjectURL(url);
-
-      setTargetMessage(`Exported setup profile with ${profile.targets.length} target${profile.targets.length === 1 ? '' : 's'}.`);
+      setExportDialogOpen(false);
+      setNotice({ severity: 'success', message: 'Setup profile exported.' });
     } catch (err) {
-      setTargetError(err instanceof Error ? err.message : 'Could not export setup profile');
-    } finally {
-      setProfileBusy(false);
+      setNotice({ severity: 'error', message: err instanceof Error ? err.message : 'Could not download setup profile' });
     }
   }
 
@@ -500,13 +511,13 @@ function SettingsApp() {
     if (!file) return;
 
     if (status === 'connected' || status === 'connecting') {
-      setTargetError('Disconnect in the popup before importing a setup profile.');
-      setTargetMessage('');
+      setNotice({ severity: 'error', message: 'Disconnect in the popup before importing a setup profile.' });
+      setNotice(null);
       return;
     }
 
-    setTargetError('');
-    setTargetMessage('');
+    setNotice(null);
+    setNotice(null);
     setProfileBusy(true);
 
     try {
@@ -576,9 +587,9 @@ function SettingsApp() {
 
       const ignoredCount = rawTargets.length - importedTargets.length;
       const ignoredText = ignoredCount > 0 ? `, ${ignoredCount} skipped` : '';
-      setTargetMessage(`Imported setup profile: ${addedCount} added, ${updatedCount} updated${ignoredText}. Secrets were not imported.`);
+      setNotice({ severity: 'success', message: `Imported: ${addedCount} added, ${updatedCount} updated${ignoredText}. Secrets were not imported.` });
     } catch (err) {
-      setTargetError(err instanceof Error ? err.message : 'Could not import setup profile');
+      setNotice({ severity: 'error', message: err instanceof Error ? err.message : 'Could not import setup profile' });
     } finally {
       setProfileBusy(false);
     }
@@ -601,11 +612,39 @@ function SettingsApp() {
                 bgcolor: 'background.paper',
               }}
             >
-              <Stack direction="row" spacing={1} alignItems="center">
-                <SettingsSuggestRoundedIcon color="primary" fontSize="small" />
-                <Typography variant="h6" sx={{ fontSize: 18, fontWeight: 700 }}>
-                  Extension Settings
-                </Typography>
+              <Stack direction="row" alignItems="center" justifyContent="space-between">
+                <Stack direction="row" spacing={1} alignItems="center">
+                  <SettingsSuggestRoundedIcon color="primary" fontSize="small" />
+                  <Typography variant="h6" sx={{ fontSize: 18, fontWeight: 700 }}>
+                    Extension Settings
+                  </Typography>
+                </Stack>
+                <Stack direction="row" spacing={0.5} alignItems="center">
+                  <IconButton
+                    size="small"
+                    title="Export Profile"
+                    onClick={handleExportProfile}
+                    disabled={profileBusy || loading}
+                  >
+                    <FileDownloadRoundedIcon fontSize="small" />
+                  </IconButton>
+                  <IconButton
+                    size="small"
+                    title="Import Profile"
+                    component="label"
+                    disabled={profileBusy || loading}
+                  >
+                    <FileUploadRoundedIcon fontSize="small" />
+                    <input
+                      hidden
+                      type="file"
+                      accept="application/json,.json"
+                      onChange={(event) => {
+                        void handleImportProfile(event);
+                      }}
+                    />
+                  </IconButton>
+                </Stack>
               </Stack>
             </Paper>
 
@@ -631,15 +670,9 @@ function SettingsApp() {
                 }}
               >
                 <Stack spacing={1.5}>
-                  <Stack direction="row" justifyContent="space-between" alignItems="center">
-                    <Typography variant="subtitle1" sx={{ fontWeight: 700 }}>
-                      Target Setup
-                    </Typography>
-                    <Stack direction="row" spacing={0.75}>
-                      {isNewTarget && <Chip size="small" label="New Target" variant="outlined" />}
-                      {selectedIsActive && status === 'connected' && <Chip size="small" label="Connected" color="success" />}
-                    </Stack>
-                  </Stack>
+                  <Typography variant="subtitle1" sx={{ fontWeight: 700 }}>
+                    Target Setup
+                  </Typography>
 
                   <Typography variant="caption" color="text.secondary">
                     Configure target profiles used in the popup.
@@ -680,12 +713,11 @@ function SettingsApp() {
                       </Select>
                     </FormControl>
                     <Button
-                      variant="outlined"
-                      startIcon={<AddRoundedIcon />}
+                      variant="contained"
                       onClick={handleNewTarget}
-                      sx={{ minWidth: { xs: '100%', sm: 120 } }}
+                      sx={{ minWidth: 0, px: 1 }}
                     >
-                      New
+                      <AddRoundedIcon fontSize="small" />
                     </Button>
                   </Stack>
 
@@ -796,64 +828,28 @@ function SettingsApp() {
                     )}
                   />
 
-                  <Stack direction={{ xs: 'column', sm: 'row' }} spacing={1} justifyContent="flex-end">
-                    <Button
-                      variant="outlined"
+                  <Stack direction="row" spacing={1} justifyContent="space-between">
+                    <IconButton
+                      size="small"
                       color="error"
-                      startIcon={<DeleteOutlineRoundedIcon />}
+                      title="Delete Target"
                       onClick={() => setDeleteDialogOpen(true)}
                       disabled={!canDeleteTarget || targetSaving}
                     >
-                      Delete
-                    </Button>
-                    <Button
-                      variant="contained"
-                      startIcon={<SaveRoundedIcon />}
+                      <DeleteOutlineRoundedIcon fontSize="small" />
+                    </IconButton>
+                    <IconButton
+                      size="small"
+                      title={targetSaving ? 'Saving...' : 'Save Target'}
                       onClick={() => void handleSaveTarget()}
                       disabled={!canSaveTarget || locked || targetSaving}
                     >
-                      {targetSaving ? 'Saving...' : 'Save Target'}
-                    </Button>
+                      <SaveRoundedIcon fontSize="small" />
+                    </IconButton>
                   </Stack>
 
-                  <Stack spacing={1}>
-                    <Typography variant="caption" color="text.secondary">
-                      Export/import setup profiles (targets, auto-login, shortcut). Passwords and client secrets are excluded.
-                    </Typography>
-                    <Stack direction={{ xs: 'column', sm: 'row' }} spacing={1} justifyContent="flex-end">
-                      <Button
-                        variant="outlined"
-                        size="small"
-                        onClick={() => void handleExportProfile()}
-                        disabled={profileBusy || loading}
-                      >
-                        Export Profile
-                      </Button>
-                      <Button
-                        variant="outlined"
-                        size="small"
-                        component="label"
-                        disabled={profileBusy || loading}
-                      >
-                        Import Profile
-                        <input
-                          hidden
-                          type="file"
-                          accept="application/json,.json"
-                          onChange={(event) => {
-                            void handleImportProfile(event);
-                          }}
-                        />
-                      </Button>
-                    </Stack>
-                  </Stack>
-
-                  {(targetError || targetMessage || loading) && (
-                    <Stack spacing={1}>
-                      {targetError && <Alert severity="error">{targetError}</Alert>}
-                      {targetMessage && <Alert severity="success">{targetMessage}</Alert>}
-                      {loading && <Alert severity="info">Loading saved target settings...</Alert>}
-                    </Stack>
+                  {loading && (
+                    <Alert severity="info">Loading saved target settings...</Alert>
                   )}
                 </Stack>
               </Paper>
@@ -869,11 +865,19 @@ function SettingsApp() {
                 }}
               >
                 <Stack spacing={1.5}>
-                  <Stack direction="row" alignItems="center" spacing={1}>
-                    <KeyboardCommandKeyRoundedIcon color="info" fontSize="small" />
-                    <Typography variant="subtitle1" sx={{ fontWeight: 700 }}>
-                      Omnisearch Shortcut
-                    </Typography>
+                  <Stack direction="row" alignItems="center" justifyContent="space-between">
+                    <Stack direction="row" alignItems="center" spacing={1}>
+                      <KeyboardCommandKeyRoundedIcon color="info" fontSize="small" />
+                      <Typography variant="subtitle1" sx={{ fontWeight: 700 }}>
+                        Omnisearch Shortcut
+                      </Typography>
+                    </Stack>
+                    <Chip
+                      size="small"
+                      label={hotkeyDirty ? 'Unsaved' : 'Saved'}
+                      color={hotkeyDirty ? 'warning' : 'success'}
+                      variant={hotkeyDirty ? 'filled' : 'outlined'}
+                    />
                   </Stack>
 
                   <Box
@@ -893,12 +897,6 @@ function SettingsApp() {
                     <Typography variant="body2" sx={{ fontWeight: 600, letterSpacing: 0.2 }}>
                       {formatOmnisearchHotkey(draftHotkey)}
                     </Typography>
-                    <Chip
-                      size="small"
-                      label={hotkeyDirty ? 'Unsaved' : 'Saved'}
-                      color={hotkeyDirty ? 'warning' : 'success'}
-                      variant={hotkeyDirty ? 'filled' : 'outlined'}
-                    />
                   </Box>
 
                   <Stack spacing={1}>
@@ -907,45 +905,43 @@ function SettingsApp() {
                       color={captureMode ? 'warning' : 'primary'}
                       size="small"
                       onClick={() => {
-                        setHotkeyError('');
-                        setHotkeyMessage('');
+                        setNotice(null);
+                        setNotice(null);
                         setCaptureMode((previous) => !previous);
                       }}
                     >
                       {captureMode ? 'Listening... press keys' : 'Capture Hotkey'}
                     </Button>
 
-                    <Stack direction="row" spacing={1}>
-                      <Button
-                        variant="outlined"
+                    <Stack direction="row" spacing={1} justifyContent="space-between">
+                      <IconButton
                         size="small"
-                        startIcon={<RestartAltRoundedIcon />}
-                        onClick={resetDraftToDefault}
-                        disabled={loading}
-                        fullWidth
-                      >
-                        Reset
-                      </Button>
-                      <Button
-                        variant="outlined"
-                        size="small"
+                        color="error"
+                        title="Discard Changes"
                         onClick={discardHotkeyChanges}
                         disabled={!hotkeyDirty || loading}
-                        fullWidth
                       >
-                        Discard
-                      </Button>
+                        <DeleteOutlineRoundedIcon fontSize="small" />
+                      </IconButton>
+                      <Stack direction="row" spacing={1}>
+                        <IconButton
+                          size="small"
+                          title="Reset to Default"
+                          onClick={resetDraftToDefault}
+                          disabled={loading}
+                        >
+                          <RestartAltRoundedIcon fontSize="small" />
+                        </IconButton>
+                        <IconButton
+                          size="small"
+                          title={hotkeySaving ? 'Saving...' : 'Save Shortcut'}
+                          onClick={() => void saveHotkey()}
+                          disabled={!hotkeyDirty || loading || hotkeySaving || captureMode}
+                        >
+                          <SaveRoundedIcon fontSize="small" />
+                        </IconButton>
+                      </Stack>
                     </Stack>
-
-                    <Button
-                      variant="contained"
-                      size="small"
-                      startIcon={<SaveRoundedIcon />}
-                      onClick={() => void saveHotkey()}
-                      disabled={!hotkeyDirty || loading || hotkeySaving || captureMode}
-                    >
-                      {hotkeySaving ? 'Saving...' : 'Save Shortcut'}
-                    </Button>
                   </Stack>
 
                   {captureMode && (
@@ -953,8 +949,6 @@ function SettingsApp() {
                       Press shortcut keys now. Press Escape to cancel.
                     </Alert>
                   )}
-                  {hotkeyError && <Alert severity="error">{hotkeyError}</Alert>}
-                  {hotkeyMessage && <Alert severity="success">{hotkeyMessage}</Alert>}
                 </Stack>
               </Paper>
             </Box>
@@ -976,8 +970,8 @@ function SettingsApp() {
         onSecretFetched={(secret) => {
           setClientSecret(secret);
           setSecretDialogOpen(false);
-          setTargetMessage('Client secret fetched.');
-          setTargetError('');
+          setNotice({ severity: 'success', message: 'Client secret fetched.' });
+          setNotice(null);
         }}
         onTlsError={() => {
           void openTransportTabInBackground();
@@ -999,6 +993,55 @@ function SettingsApp() {
           setAutoLoginDialogOpen(false);
         }}
       />
+
+      <Dialog
+        open={exportDialogOpen}
+        onClose={() => setExportDialogOpen(false)}
+        maxWidth="sm"
+        fullWidth
+      >
+        <DialogTitle>Export Setup Profile</DialogTitle>
+        <DialogContent>
+          <Typography variant="body2" color="text.secondary" sx={{ mb: 1.5 }}>
+            Passwords and client secrets are excluded.
+          </Typography>
+          <Box
+            component="pre"
+            sx={{
+              p: 1.5,
+              borderRadius: 1,
+              bgcolor: 'action.hover',
+              fontSize: '0.75rem',
+              overflow: 'auto',
+              maxHeight: 300,
+              m: 0,
+            }}
+          >
+            {exportJson}
+          </Box>
+        </DialogContent>
+        <DialogActions>
+          <Button onClick={() => setExportDialogOpen(false)}>Cancel</Button>
+          <Button variant="contained" onClick={handleExportDownload}>
+            Download
+          </Button>
+        </DialogActions>
+      </Dialog>
+
+      <Dialog
+        open={notice !== null}
+        onClose={() => setNotice(null)}
+        maxWidth="xs"
+        fullWidth
+      >
+        <DialogTitle>{notice?.severity === 'error' ? 'Error' : 'Notice'}</DialogTitle>
+        <DialogContent>
+          <Typography variant="body2">{notice?.message}</Typography>
+        </DialogContent>
+        <DialogActions>
+          <Button onClick={() => setNotice(null)}>OK</Button>
+        </DialogActions>
+      </Dialog>
     </ThemeProvider>
   );
 }
