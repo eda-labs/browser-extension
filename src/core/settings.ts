@@ -1,7 +1,6 @@
 import { api } from './api';
 
 export const OMNISEARCH_HOTKEY_STORAGE_KEY = 'omnisearchHotkey';
-export const AUTO_SIZE_ALL_COLUMNS_STORAGE_KEY = 'autoSizeAllColumns';
 
 export interface OmnisearchHotkey {
   code: string;
@@ -69,10 +68,6 @@ function isRecord(value: unknown): value is Record<string, unknown> {
 
 function toBoolean(value: unknown): boolean {
   return value === true;
-}
-
-export function normalizeAutoSizeAllColumns(value: unknown): boolean {
-  return toBoolean(value);
 }
 
 export function hasHotkeyModifier(hotkey: OmnisearchHotkey): boolean {
