@@ -1,6 +1,13 @@
 import { build } from 'esbuild';
 import { cpSync, rmSync, mkdirSync, readFileSync, writeFileSync } from 'fs';
 
+const packageJson = JSON.parse(readFileSync('package.json', 'utf-8'));
+const manifestVersion = String(packageJson.version).split('-')[0];
+if (!/^\d+\.\d+\.\d+$/.test(manifestVersion)) {
+  console.error(`Invalid package.json version "${packageJson.version}". Expected x.y.z.`);
+  process.exit(1);
+}
+
 const targets = [];
 if (process.argv.includes('--firefox')) targets.push('firefox');
 if (process.argv.includes('--chromium')) targets.push('chromium');
@@ -30,12 +37,14 @@ for (const target of targets) {
   mkdirSync(outdir, { recursive: true });
   cpSync('static/', outdir + '/', { recursive: true });
 
+  const manifest = JSON.parse(readFileSync(outdir + '/manifest.json', 'utf-8'));
+  manifest.version = manifestVersion;
+
   if (target === 'chromium') {
-    const manifest = JSON.parse(readFileSync(outdir + '/manifest.json', 'utf-8'));
     manifest.background = { service_worker: 'background.js' };
     delete manifest.browser_specific_settings;
-    writeFileSync(outdir + '/manifest.json', JSON.stringify(manifest, null, 2) + '\n');
   }
+  writeFileSync(outdir + '/manifest.json', JSON.stringify(manifest, null, 2) + '\n');
 
   await build({ ...bgOpts, outdir });
   await build({ ...uiOpts, outdir });
