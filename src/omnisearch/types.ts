@@ -1,17 +1,8 @@
-export interface WorkflowMeta {
-  group: string;
-  version: string;
-  plural: string;
-  kind: string;
-}
-
 export interface NavItem {
   label: string;
   href: string;
   section: string;
   keywords: string;
-  action?: 'workflow-run';
-  workflowMeta?: WorkflowMeta;
 }
 
 export interface EqlResult {
@@ -35,7 +26,6 @@ export interface ParsedKind {
   group: string;
   version: string;
   namespaced?: boolean;
-  isWorkflow?: boolean;
   isInstance?: boolean;
   instanceName?: string;
   instanceNamespace?: string;

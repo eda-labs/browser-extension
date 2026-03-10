@@ -1,28 +1,42 @@
 import type { ParsedKind } from './types';
 
+function escapeRegex(value: string): string {
+  return value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+}
+
 export function checkAccess(
   openApiPaths: Record<string, unknown>,
   group: string,
   version: string,
   plural: string,
   namespaced: boolean,
-  isWorkflow: boolean,
 ): 'None' | 'Read' | 'ReadWrite' {
   let access: 'None' | 'Read' | 'ReadWrite' = 'None';
 
-  const base = isWorkflow
-    ? `/workflows/v1/${group}/${version}/${plural}`
-    : `/apps/${group}/${version}${namespaced ? '/[^/]+' : ''}/${plural}`;
+  const groupEscaped = escapeRegex(group);
+  const versionEscaped = escapeRegex(version);
+  const pluralEscaped = escapeRegex(plural);
 
-  let re: RegExp;
-  try {
-    re = new RegExp(`^${base}(/.+)?$`);
-  } catch {
-    return 'None';
+  const patterns: string[] = [];
+  // Newer EDA OpenAPI exposes both collection and namespaced forms:
+  // /apps/<group>/<version>/<plural>
+  // /apps/<group>/<version>/namespaces/<ns>/<plural>
+  patterns.push(`^/apps/${groupEscaped}/${versionEscaped}/${pluralEscaped}(/.+)?$`);
+  if (namespaced) {
+    patterns.push(`^/apps/${groupEscaped}/${versionEscaped}/namespaces/[^/]+/${pluralEscaped}(/.+)?$`);
+  }
+
+  const matchers: RegExp[] = [];
+  for (const pattern of patterns) {
+    try {
+      matchers.push(new RegExp(pattern));
+    } catch {
+      return 'None';
+    }
   }
 
   for (const [path, methods] of Object.entries(openApiPaths)) {
-    if (!re.test(path)) continue;
+    if (!matchers.some((matcher) => matcher.test(path))) continue;
     if (!methods || typeof methods !== 'object') continue;
     for (const method of Object.keys(methods as Record<string, unknown>)) {
       const normalized = method.toLowerCase();

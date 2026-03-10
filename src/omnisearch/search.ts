@@ -80,9 +80,7 @@ export function dedupeAndSortItems(items: NavItem[]): NavItem[] {
   const out: NavItem[] = [];
 
   for (const item of items) {
-    const key = item.action === 'workflow-run' && item.workflowMeta
-      ? `workflow:${item.workflowMeta.group}/${item.workflowMeta.version}/${item.workflowMeta.plural}`
-      : `${item.href}::${item.label}`;
+    const key = `${item.href}::${item.label}`;
     if (seen.has(key)) continue;
     seen.add(key);
     out.push(item);

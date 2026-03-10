@@ -21,8 +21,7 @@ import type { ThemeMode } from '../core/theme-mode';
 import type { EqlAutocompleteItem, EqlResult, NavItem } from './types';
 import { flattenResultFields, pickTableColumns, processEqlResponse, processEqlAutocompleteResponse } from './eql';
 import { scoreMatch } from './search';
-import { navigate, triggerWorkflowRun } from './navigation';
-import { humanizeLabel } from './catalog';
+import { navigate } from './navigation';
 import {
   EQL_AUTOCOMPLETE_REQUEST_MSG,
   EQL_AUTOCOMPLETE_RESPONSE_MSG,
@@ -336,12 +335,14 @@ export function OmnisearchOverlay({ mode, fontFamily, getNavState, onClose, subs
         sectionOrder.push(sec);
         sectionItems.set(sec, []);
       }
-      sectionItems.get(sec)!.push(s);
+      const sectionGroup = sectionItems.get(sec);
+      if (sectionGroup) sectionGroup.push(s);
     }
     // Sort within each section by score, then flatten
     const result: NavItem[] = [];
     for (const sec of sectionOrder) {
-      const group = sectionItems.get(sec)!;
+      const group = sectionItems.get(sec);
+      if (!group) continue;
       group.sort((a, b) => b.score - a.score);
       for (const s of group) result.push(s.item);
     }
@@ -392,11 +393,7 @@ export function OmnisearchOverlay({ mode, fontFamily, getNavState, onClose, subs
   const handleNavItemClick = useCallback(
     (item: NavItem) => {
       onClose();
-      if (item.action === 'workflow-run' && item.workflowMeta) {
-        triggerWorkflowRun(item.workflowMeta, humanizeLabel);
-      } else {
-        navigate(item.href);
-      }
+      navigate(item.href);
     },
     [onClose],
   );
@@ -766,7 +763,7 @@ export function OmnisearchOverlay({ mode, fontFamily, getNavState, onClose, subs
                 const row = flattenedRows[index];
                 return (
                   <TableRow
-                    key={index}
+                    key={item.path}
                     onClick={navigateToEql}
                     sx={{ cursor: 'pointer', '&:hover': { bgcolor: colors.accentWeak } }}
                   >

@@ -33,11 +33,18 @@ type OmnisearchWindow = Window & {
 };
 
 const CACHE_TTL_MS = 60_000;
+const REQUEST_TIMEOUT_MS = 20_000;
 const INSTANCE_RESOURCE_LIMIT = 220;
 const INSTANCE_ITEMS_PER_RESOURCE = 250;
 const INSTANCE_FETCH_CONCURRENCY = 6;
 const INSTANCE_TOTAL_LIMIT = 8000;
 const INSTANCE_EQL_QUERY_LIMIT = 1000;
+const FAST_INSTANCE_RESOURCE_LIMIT = 20;
+const SLOW_INSTANCE_RESOURCE_LIMIT = Math.max(0, INSTANCE_RESOURCE_LIMIT - FAST_INSTANCE_RESOURCE_LIMIT);
+const FAST_INSTANCE_ITEMS_PER_RESOURCE = 80;
+const FAST_INSTANCE_TOTAL_LIMIT = 1200;
+const FAST_INSTANCE_EQL_QUERY_LIMIT = 120;
+const FAST_INSTANCE_FETCH_CONCURRENCY = 12;
 
 interface EdaResponsePayload {
   ok: boolean;
@@ -131,25 +138,42 @@ async function sendEdaRequest(path: string, method = 'GET', body?: string): Prom
     return { ok: false, status: 0, body: 'Waiting for EDA auth token' };
   }
 
+  const controller = typeof AbortController === 'function' ? new AbortController() : null;
+  const timeoutId = controller
+    ? window.setTimeout(() => controller.abort(), REQUEST_TIMEOUT_MS)
+    : null;
+
   const requestInit: RequestInit = {
     method,
     headers: {
       Authorization: `Bearer ${state.token}`,
     },
     credentials: 'same-origin',
+    signal: controller?.signal,
   };
 
   if (body && method !== 'GET' && method !== 'HEAD') {
     requestInit.body = body;
   }
 
-  const response = await fetch(path, requestInit);
-
-  return {
-    ok: response.ok,
-    status: response.status,
-    body: await response.text(),
-  };
+  try {
+    const response = await fetch(path, requestInit);
+    return {
+      ok: response.ok,
+      status: response.status,
+      body: await response.text(),
+    };
+  } catch (error) {
+    return {
+      ok: false,
+      status: 0,
+      body: getErrorMessage(error),
+    };
+  } finally {
+    if (timeoutId != null) {
+      window.clearTimeout(timeoutId);
+    }
+  }
 }
 
 async function fetchJson(url: string): Promise<unknown> {
@@ -180,20 +204,46 @@ async function fetchEqlItems(query: string): Promise<Array<Record<string, unknow
   return extractObjectArray(payload);
 }
 
-async function fetchResourceInstances(resource: ParsedKind): Promise<Array<Record<string, unknown>>> {
-  const queries = buildResourceEqlQueries(resource, INSTANCE_EQL_QUERY_LIMIT);
+async function fetchResourceInstances(
+  resource: ParsedKind,
+  eqlQueryLimit: number,
+  itemLimitPerResource: number,
+): Promise<Array<Record<string, unknown>>> {
+  const queries = buildResourceEqlQueries(resource, eqlQueryLimit);
   for (const query of queries) {
-    const objects = await fetchEqlItems(query).catch(() => []);
+    const objects = (await fetchEqlItems(query).catch(() => []))
+      .slice(0, itemLimitPerResource);
     if (objects.length > 0) return objects;
   }
   return [];
 }
 
-async function fetchInstanceItems(resources: ParsedKind[]): Promise<ParsedKind[]> {
+interface FetchInstanceOptions {
+  resourceLimit?: number;
+  itemLimitPerResource?: number;
+  totalLimit?: number;
+  eqlQueryLimit?: number;
+  concurrency?: number;
+  onItems?: (items: ParsedKind[]) => void;
+  priority?: (resource: ParsedKind) => number;
+}
+
+async function fetchInstanceItems(
+  resources: ParsedKind[],
+  options: FetchInstanceOptions = {},
+): Promise<ParsedKind[]> {
+  const resourceLimit = options.resourceLimit ?? INSTANCE_RESOURCE_LIMIT;
+  const itemLimitPerResource = options.itemLimitPerResource ?? INSTANCE_ITEMS_PER_RESOURCE;
+  const totalLimit = options.totalLimit ?? INSTANCE_TOTAL_LIMIT;
+  const eqlQueryLimit = options.eqlQueryLimit ?? INSTANCE_EQL_QUERY_LIMIT;
+  const concurrency = options.concurrency ?? INSTANCE_FETCH_CONCURRENCY;
+  const onItems = options.onItems;
+  const priority = options.priority ?? resourcePriority;
+
   const uniqueResources = new Map<string, ParsedKind>();
 
   for (const resource of resources) {
-    if (resource.isWorkflow || resource.isInstance) continue;
+    if (resource.isInstance) continue;
     const key = `${resource.group}/${resource.version}/${resource.plural}`;
     if (!uniqueResources.has(key)) {
       uniqueResources.set(key, resource);
@@ -201,30 +251,37 @@ async function fetchInstanceItems(resources: ParsedKind[]): Promise<ParsedKind[]
   }
 
   const sortedResources = Array.from(uniqueResources.values()).sort((a, b) => {
-    const pa = resourcePriority(a);
-    const pb = resourcePriority(b);
+    const pa = priority(a);
+    const pb = priority(b);
     if (pa !== pb) return pa - pb;
     return `${a.group}/${a.plural}`.localeCompare(`${b.group}/${b.plural}`);
   });
-  const resourcesToFetch = sortedResources.slice(0, INSTANCE_RESOURCE_LIMIT);
+  const resourcesToFetch = sortedResources.slice(0, resourceLimit);
 
   const out: ParsedKind[] = [];
   const seen = new Set<string>();
   let index = 0;
 
   async function worker(): Promise<void> {
-    while (out.length < INSTANCE_TOTAL_LIMIT && index < resourcesToFetch.length) {
+    while (out.length < totalLimit && index < resourcesToFetch.length) {
       const resource = resourcesToFetch[index++];
-      const objects = (await fetchResourceInstances(resource))
-        .slice(0, INSTANCE_ITEMS_PER_RESOURCE);
+      const objects = await fetchResourceInstances(
+        resource,
+        eqlQueryLimit,
+        itemLimitPerResource,
+      );
+      const fresh: ParsedKind[] = [];
       for (const object of objects) {
         const instanceName = extractItemName(object);
         if (!instanceName) continue;
+        if (resource.plural.toLowerCase() === 'workflowdefinitions' && instanceName.toLowerCase().endsWith('-gvk')) {
+          continue;
+        }
         const objectNamespace = extractItemNamespace(object);
         const key = `${resource.group}/${resource.version}/${resource.plural}/${objectNamespace}/${instanceName}`;
         if (seen.has(key)) continue;
         seen.add(key);
-        out.push({
+        const item: ParsedKind = {
           plural: resource.plural,
           kind: resource.kind,
           label: instanceName,
@@ -233,18 +290,26 @@ async function fetchInstanceItems(resources: ParsedKind[]): Promise<ParsedKind[]
           group: resource.group,
           version: resource.version,
           namespaced: resource.namespaced,
-          isWorkflow: false,
           isInstance: true,
           instanceName,
           instanceNamespace: objectNamespace || undefined,
           instanceSearchText: extractInstanceSearchText(object),
-        });
-        if (out.length >= INSTANCE_TOTAL_LIMIT) break;
+        };
+        out.push(item);
+        fresh.push(item);
+        if (out.length >= totalLimit) break;
+      }
+      if (fresh.length > 0 && onItems) {
+        try {
+          onItems(fresh);
+        } catch {
+          // Never fail enrichment due to a callback error.
+        }
       }
     }
   }
 
-  const workers = Array.from({ length: INSTANCE_FETCH_CONCURRENCY }, () => worker());
+  const workers = Array.from({ length: concurrency }, () => worker());
   await Promise.all(workers);
   return out;
 }
@@ -279,8 +344,9 @@ async function fetchGroupItems(groupName: string, version: string): Promise<Pars
     const kind = typeof item.kind === 'string' && item.kind ? item.kind : plural;
     const namespaced = Boolean(item.namespaced);
 
-    // Keep all discovered resources searchable, even when OpenAPI access
-    // metadata is incomplete or does not expose a GET path for this target.
+    const access = checkAccess(openApiPaths, groupName, version, plural, namespaced);
+    if (access === 'None') continue;
+
     out.push({
       plural,
       kind,
@@ -290,24 +356,31 @@ async function fetchGroupItems(groupName: string, version: string): Promise<Pars
       group: groupName,
       version,
       namespaced,
-      isWorkflow: false,
     });
+  }
+  return out;
+}
 
-    const workflowAccess = checkAccess(openApiPaths, groupName, version, plural, namespaced, true);
-    if (workflowAccess !== 'None') {
-      out.push({
-        plural,
-        kind,
-        label: kind,
-        category: '',
-        panel: 'main',
-        group: groupName,
-        version,
-        namespaced,
-        isWorkflow: true,
-      });
+function parsedKindCacheKey(item: ParsedKind): string {
+  if (item.isInstance) {
+    return `i:${item.group}/${item.version}/${item.plural}/${item.instanceNamespace || ''}/${item.instanceName || ''}`;
+  }
+  return `r:${item.group}/${item.version}/${item.plural}`;
+}
+
+function mergeParsedKinds(...lists: ParsedKind[][]): ParsedKind[] {
+  const out: ParsedKind[] = [];
+  const seen = new Set<string>();
+
+  for (const list of lists) {
+    for (const item of list) {
+      const key = parsedKindCacheKey(item);
+      if (seen.has(key)) continue;
+      seen.add(key);
+      out.push(item);
     }
   }
+
   return out;
 }
 
@@ -350,13 +423,87 @@ async function fetchAllResources(force: boolean): Promise<void> {
     post(APPS_RESPONSE_MSG, { data: flattened });
 
     void (async () => {
-      const instanceItems = await fetchInstanceItems(flattened).catch(() => []);
-      if (instanceItems.length === 0) return;
-      const latestState = getState();
-      const merged = [...flattened, ...instanceItems];
-      latestState.cachedItems = merged;
-      latestState.lastFetchTs = Date.now();
-      post(APPS_RESPONSE_MSG, { data: merged, enriched: true });
+      const uniqueResources = new Map<string, ParsedKind>();
+      for (const resource of flattened) {
+        const key = `${resource.group}/${resource.version}/${resource.plural}`;
+        if (!uniqueResources.has(key)) {
+          uniqueResources.set(key, resource);
+        }
+      }
+      const sortedResources = Array.from(uniqueResources.values()).sort((a, b) => {
+        const pa = resourcePriority(a);
+        const pb = resourcePriority(b);
+        if (pa !== pb) return pa - pb;
+        return `${a.group}/${a.plural}`.localeCompare(`${b.group}/${b.plural}`);
+      });
+
+      const fastResources = sortedResources.slice(0, FAST_INSTANCE_RESOURCE_LIMIT);
+      const slowResources = sortedResources.slice(
+        FAST_INSTANCE_RESOURCE_LIMIT,
+        FAST_INSTANCE_RESOURCE_LIMIT + SLOW_INSTANCE_RESOURCE_LIMIT,
+      );
+
+      const fastInstanceItems: ParsedKind[] = [];
+      const slowInstanceItems: ParsedKind[] = [];
+      const fastSeen = new Set<string>();
+      const slowSeen = new Set<string>();
+      let lastPublishedCount = flattened.length;
+
+      function publishMerged(): void {
+        const merged = mergeParsedKinds(flattened, fastInstanceItems, slowInstanceItems);
+        if (merged.length <= lastPublishedCount) return;
+        lastPublishedCount = merged.length;
+        const latestState = getState();
+        latestState.cachedItems = merged;
+        latestState.lastFetchTs = Date.now();
+        post(APPS_RESPONSE_MSG, { data: merged, enriched: true });
+      }
+
+      function appendItems(target: ParsedKind[], targetSeen: Set<string>, items: ParsedKind[]): void {
+        let changed = false;
+        for (const item of items) {
+          const key = parsedKindCacheKey(item);
+          if (targetSeen.has(key)) continue;
+          targetSeen.add(key);
+          target.push(item);
+          changed = true;
+        }
+        if (changed) {
+          publishMerged();
+        }
+      }
+
+      if (fastResources.length > 0) {
+        try {
+          const items = await fetchInstanceItems(
+            fastResources,
+            {
+              itemLimitPerResource: FAST_INSTANCE_ITEMS_PER_RESOURCE,
+              totalLimit: FAST_INSTANCE_TOTAL_LIMIT,
+              eqlQueryLimit: FAST_INSTANCE_EQL_QUERY_LIMIT,
+              concurrency: FAST_INSTANCE_FETCH_CONCURRENCY,
+              onItems: (newItems) => appendItems(fastInstanceItems, fastSeen, newItems),
+            },
+          );
+          appendItems(fastInstanceItems, fastSeen, items);
+        } catch {
+          // Preserve base resource results even if enrichment fails.
+        }
+      }
+
+      if (slowResources.length > 0) {
+        try {
+          const items = await fetchInstanceItems(
+            slowResources,
+            {
+              onItems: (newItems) => appendItems(slowInstanceItems, slowSeen, newItems),
+            },
+          );
+          appendItems(slowInstanceItems, slowSeen, items);
+        } catch {
+          // Preserve base resource results even if enrichment fails.
+        }
+      }
     })();
   } catch (err) {
     post(APPS_RESPONSE_MSG, {

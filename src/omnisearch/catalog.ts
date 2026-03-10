@@ -82,25 +82,6 @@ export function processAppsPayload(data: unknown, quickActions: NavItem[]): NavI
     const panel = entry.panel || getPanel(entry.group, entry.plural);
     const href = `/ui/app/${panel}/${encodeURIComponent(entry.group)}/${encodeURIComponent(entry.version)}/${encodeURIComponent(entry.plural)}`;
 
-    if (entry.isWorkflow) {
-      const workflowKey = `workflow-run:${entry.group}/${entry.version}/${entry.plural}`;
-      if (seen.has(workflowKey)) continue;
-      seen.add(workflowKey);
-
-      const kind = entry.kind || entry.plural;
-      const label = `Run: ${humanizeLabel(kind)}`;
-      const keywords = `run workflow ${kind.toLowerCase()} ${entry.plural.toLowerCase()} ${entry.group.toLowerCase()} new create`;
-      items.push({
-        label,
-        href: '/ui/main/workflows',
-        section: 'Workflows',
-        keywords,
-        action: 'workflow-run',
-        workflowMeta: { group: entry.group, version: entry.version, plural: entry.plural, kind },
-      });
-      continue;
-    }
-
     if (entry.isInstance) {
       const instanceName = (entry.instanceName || entry.label || '').trim();
       if (!instanceName) continue;
