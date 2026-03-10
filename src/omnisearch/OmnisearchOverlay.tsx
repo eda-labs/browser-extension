@@ -508,6 +508,7 @@ export function OmnisearchOverlay({ mode, fontFamily, getNavState, onClose, subs
 
   // Footer count text
   const footerCount = useMemo(() => {
+    void navVersion;
     if (eqlMode) {
       const displayed = Math.min(eqlResults.length, EQL_DISPLAY_LIMIT);
       if (eqlResults.length > displayed) return `Showing ${displayed} of ${eqlResults.length} EQL results`;
@@ -525,9 +526,10 @@ export function OmnisearchOverlay({ mode, fontFamily, getNavState, onClose, subs
       return `${base} | loaded in ${loadedSeconds}s`;
     }
     return base;
-  }, [eqlMode, eqlResults.length, filteredItems.length, loadingClockMs, navVersion]);
+  }, [eqlMode, eqlResults.length, filteredItems.length, loadingClockMs, navVersion, getNavState]);
 
   const loadingBannerText = useMemo(() => {
+    void navVersion;
     if (eqlMode) return '';
     const navState = getNavState();
     if (navState.loading && navState.loadingStartedAt > 0) {
@@ -538,7 +540,7 @@ export function OmnisearchOverlay({ mode, fontFamily, getNavState, onClose, subs
       return `Loading app catalog... ${elapsedSeconds}s`;
     }
     return '';
-  }, [eqlMode, loadingClockMs, navVersion]);
+  }, [eqlMode, loadingClockMs, navVersion, getNavState]);
 
   // Completions dropdown visibility
   const completionsOpen =

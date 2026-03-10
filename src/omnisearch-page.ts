@@ -429,9 +429,9 @@ async function fetchAllResources(force: boolean): Promise<void> {
     const groupResults: ParsedKind[][] = Array.from({ length: groupPlans.length }, () => []);
     let publishedBaseCount = 0;
 
-    function publishBase(partial: boolean, force = false): ParsedKind[] {
+    function publishBase(partial: boolean, forcePublish = false): ParsedKind[] {
       const merged = mergeParsedKinds(...groupResults);
-      if (!force && merged.length <= publishedBaseCount) return merged;
+      if (!forcePublish && merged.length <= publishedBaseCount) return merged;
       publishedBaseCount = merged.length;
       const latestState = getState();
       latestState.cachedItems = merged;
