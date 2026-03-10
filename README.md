@@ -29,6 +29,11 @@ If your EDA installation is using self-signed certs, or using a certificate not 
 
 ![][open-ext-screenshot]
 
+## Build
+
+* `npm install` and `npm run dev` - opens a dev firefox with extension loaded
+* `npm run build:firefox` or `npm run build:chromium`
+
 [firefox-dl-badge]: https://github.com/user-attachments/assets/e5c90af9-06b4-4c61-a91c-77179218fd71
 [firefox-latest-xpi]: https://github.com/eda-labs/browser-extension/releases/latest/download/eda_browser_extension.xpi
 [chrome-latest-crx]: https://github.com/eda-labs/browser-extension/releases/latest/download/eda_browser_extension.crx
