@@ -1,6 +1,7 @@
 export type ThemeMode = 'light' | 'dark';
 
 export const EDA_THEME_MODE_STORAGE_KEY = 'edaThemeMode';
+export const EDA_FONT_FAMILY_STORAGE_KEY = 'edaFontFamily';
 export const DEFAULT_THEME_MODE: ThemeMode = 'dark';
 
 const MODE_CANDIDATE_ATTRIBUTES = [
@@ -47,6 +48,22 @@ interface ParsedColor {
   green: number;
   blue: number;
 }
+
+const CSS_FONT_INJECTION_TOKENS = /[;\n\r{}]/u;
+const GENERIC_FONT_FAMILIES = new Set([
+  'serif',
+  'sans-serif',
+  'monospace',
+  'cursive',
+  'fantasy',
+  'system-ui',
+  'ui-serif',
+  'ui-sans-serif',
+  'ui-monospace',
+  'emoji',
+  'math',
+  'fangsong',
+]);
 
 function clampChannel(channel: number): number {
   return Math.max(0, Math.min(255, channel));
@@ -100,11 +117,40 @@ function getRelativeLuminance(color: ParsedColor): number {
   return (0.2126 * red) + (0.7152 * green) + (0.0722 * blue);
 }
 
+function sanitizeFontFamily(value: string | null | undefined): string | null {
+  if (!value) return null;
+  const normalized = value.replace(/\s+/gu, ' ').trim();
+  if (!normalized || normalized.length > 220) return null;
+  if (CSS_FONT_INJECTION_TOKENS.test(normalized)) return null;
+  return normalized;
+}
+
+function firstFontToken(fontFamily: string): string {
+  const first = fontFamily.split(',')[0]?.trim() ?? '';
+  return first.replace(/^['"]|['"]$/gu, '').trim().toLowerCase();
+}
+
+function scoreFontFamily(fontFamily: string): number {
+  const normalized = fontFamily.toLowerCase();
+  if (normalized.includes('nokia') && normalized.includes('pure')) return 5;
+  if (normalized.includes('nokia')) return 4;
+  if (normalized.includes('pure')) return 3;
+
+  const firstToken = firstFontToken(fontFamily);
+  if (!firstToken || GENERIC_FONT_FAMILIES.has(firstToken)) return 1;
+  return 2;
+}
+
 export function normalizeStoredThemeMode(
   value: unknown,
   fallback: ThemeMode = DEFAULT_THEME_MODE,
 ): ThemeMode {
   return asThemeMode(value) ?? fallback;
+}
+
+export function normalizeStoredFontFamily(value: unknown): string | null {
+  if (typeof value !== 'string') return null;
+  return sanitizeFontFamily(value);
 }
 
 export function detectThemeModeFromDocument(doc: Document = document): ThemeMode {
@@ -142,4 +188,25 @@ export function detectThemeModeFromDocument(doc: Document = document): ThemeMode
   }
 
   return DEFAULT_THEME_MODE;
+}
+
+export function detectPreferredFontFamilyFromDocument(doc: Document = document): string | null {
+  const modeSources = [doc.body, doc.documentElement].filter((entry): entry is HTMLElement => entry != null);
+  if (modeSources.length === 0 || !doc.defaultView) return null;
+
+  let bestCandidate: string | null = null;
+  let bestScore = 0;
+
+  for (const source of modeSources) {
+    const computed = doc.defaultView.getComputedStyle(source);
+    const candidate = sanitizeFontFamily(computed.fontFamily);
+    if (!candidate) continue;
+    const score = scoreFontFamily(candidate);
+    if (score > bestScore) {
+      bestCandidate = candidate;
+      bestScore = score;
+    }
+  }
+
+  return bestCandidate;
 }

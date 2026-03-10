@@ -5,7 +5,9 @@ import { createAppTheme } from './theme';
 import { api } from './core/api';
 import {
   DEFAULT_THEME_MODE,
+  EDA_FONT_FAMILY_STORAGE_KEY,
   EDA_THEME_MODE_STORAGE_KEY,
+  normalizeStoredFontFamily,
   normalizeStoredThemeMode,
   type ThemeMode,
 } from './core/theme-mode';
@@ -15,12 +17,13 @@ import { TargetSelector } from './components/TargetSelector';
 
 function PopupApp() {
   const [themeMode, setThemeMode] = useState<ThemeMode>(DEFAULT_THEME_MODE);
+  const [fontFamily, setFontFamily] = useState<string | null>(null);
   const [status, setStatus] = useState<ConnectionStatus>('disconnected');
   const [error, setError] = useState('');
   const [targets, setTargets] = useState<TargetProfile[]>([]);
   const [selectedTargetId, setSelectedTargetId] = useState<string | null>(null);
   const [activeTargetId, setActiveTargetId] = useState<string | null>(null);
-  const theme = useMemo(() => createAppTheme(themeMode), [themeMode]);
+  const theme = useMemo(() => createAppTheme(themeMode, fontFamily), [themeMode, fontFamily]);
 
   useEffect(() => {
     void (async () => {
@@ -28,16 +31,19 @@ function PopupApp() {
         'targets',
         'connectionStatus',
         'activeTargetId',
+        EDA_FONT_FAMILY_STORAGE_KEY,
         EDA_THEME_MODE_STORAGE_KEY,
       ]);
       const loadedTargets = (stored.targets as TargetProfile[] | undefined) ?? [];
       const loadedStatus = (stored.connectionStatus as ConnectionStatus | undefined) ?? 'disconnected';
       const loadedActiveId = (stored.activeTargetId as string | undefined) ?? null;
+      const loadedFontFamily = normalizeStoredFontFamily(stored[EDA_FONT_FAMILY_STORAGE_KEY]);
       const loadedThemeMode = normalizeStoredThemeMode(stored[EDA_THEME_MODE_STORAGE_KEY]);
 
       setTargets(loadedTargets);
       setStatus(loadedStatus);
       setActiveTargetId(loadedActiveId);
+      setFontFamily(loadedFontFamily);
       setThemeMode(loadedThemeMode);
 
       if (loadedActiveId && loadedTargets.some((target) => target.id === loadedActiveId)) {
@@ -60,6 +66,9 @@ function PopupApp() {
       }
       if (changes.targets) {
         setTargets((changes.targets.newValue as TargetProfile[]) ?? []);
+      }
+      if (changes[EDA_FONT_FAMILY_STORAGE_KEY]) {
+        setFontFamily(normalizeStoredFontFamily(changes[EDA_FONT_FAMILY_STORAGE_KEY].newValue));
       }
       if (changes[EDA_THEME_MODE_STORAGE_KEY]) {
         setThemeMode(normalizeStoredThemeMode(changes[EDA_THEME_MODE_STORAGE_KEY].newValue));

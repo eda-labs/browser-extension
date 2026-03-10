@@ -5,6 +5,8 @@ import '@fontsource/roboto/latin-700.css';
 import { createTheme, type PaletteOptions } from '@mui/material/styles';
 import { DEFAULT_THEME_MODE, type ThemeMode } from './core/theme-mode';
 
+const DEFAULT_FONT_FAMILY = '"Roboto", sans-serif';
+
 function buildPalette(mode: ThemeMode): PaletteOptions {
   if (mode === 'light') {
     return {
@@ -33,10 +35,13 @@ function buildPalette(mode: ThemeMode): PaletteOptions {
   };
 }
 
-export function createAppTheme(mode: ThemeMode = DEFAULT_THEME_MODE) {
+export function createAppTheme(
+  mode: ThemeMode = DEFAULT_THEME_MODE,
+  fontFamily: string | null = null,
+) {
   return createTheme({
     typography: {
-      fontFamily: '"Roboto", sans-serif',
+      fontFamily: fontFamily ?? DEFAULT_FONT_FAMILY,
     },
     components: {
       MuiButton: {

@@ -1,6 +1,8 @@
 import { api } from './core/api';
 import {
+  detectPreferredFontFamilyFromDocument,
   detectThemeModeFromDocument,
+  EDA_FONT_FAMILY_STORAGE_KEY,
   EDA_THEME_MODE_STORAGE_KEY,
   type ThemeMode,
 } from './core/theme-mode';
@@ -22,6 +24,8 @@ let omnisearchModulePromise: Promise<typeof import('./omnisearch')> | null = nul
 let edaThemeObserver: MutationObserver | null = null;
 let themeSyncTimeout: ReturnType<typeof setTimeout> | null = null;
 let lastStoredThemeMode: ThemeMode | null = null;
+let lastStoredFontFamily: string | null = null;
+let appearanceSyncedOnce = false;
 
 function getOmnisearchModule(): Promise<typeof import('./omnisearch')> {
   if (!omnisearchModulePromise) {
@@ -45,10 +49,25 @@ function isEdaSite(): boolean {
 }
 
 async function persistThemeMode(mode: ThemeMode): Promise<void> {
-  if (mode === lastStoredThemeMode) return;
-  lastStoredThemeMode = mode;
+  const fontFamily = detectPreferredFontFamilyFromDocument();
+  const patch: Record<string, string> = {};
+  const forceSync = !appearanceSyncedOnce;
+
+  if (forceSync || mode !== lastStoredThemeMode) {
+    patch[EDA_THEME_MODE_STORAGE_KEY] = mode;
+    lastStoredThemeMode = mode;
+  }
+
+  if (forceSync || fontFamily !== lastStoredFontFamily) {
+    patch[EDA_FONT_FAMILY_STORAGE_KEY] = fontFamily ?? '';
+    lastStoredFontFamily = fontFamily;
+  }
+
+  if (Object.keys(patch).length === 0) return;
+
   try {
-    await api.storage.local.set({ [EDA_THEME_MODE_STORAGE_KEY]: mode });
+    await api.storage.local.set(patch);
+    appearanceSyncedOnce = true;
   } catch {
     // Theme sync is best effort only.
   }

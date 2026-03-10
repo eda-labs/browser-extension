@@ -36,7 +36,9 @@ import { TlsErrorDialog } from './components/TlsErrorDialog';
 import { api } from './core/api';
 import {
   DEFAULT_THEME_MODE,
+  EDA_FONT_FAMILY_STORAGE_KEY,
   EDA_THEME_MODE_STORAGE_KEY,
+  normalizeStoredFontFamily,
   normalizeStoredThemeMode,
   type ThemeMode,
 } from './core/theme-mode';
@@ -115,6 +117,7 @@ function parseImportedTarget(entry: unknown): TargetProfile | null {
 
 function SettingsApp() {
   const [themeMode, setThemeMode] = useState<ThemeMode>(DEFAULT_THEME_MODE);
+  const [fontFamily, setFontFamily] = useState<string | null>(null);
   const [status, setStatus] = useState<ConnectionStatus>('disconnected');
   const [targets, setTargets] = useState<TargetProfile[]>([]);
   const [selectedTargetId, setSelectedTargetId] = useState<string | null>(null);
@@ -143,7 +146,7 @@ function SettingsApp() {
 
   const [loading, setLoading] = useState(true);
   const loaded = useRef(false);
-  const theme = useMemo(() => createAppTheme(themeMode), [themeMode]);
+  const theme = useMemo(() => createAppTheme(themeMode, fontFamily), [themeMode, fontFamily]);
 
   const hotkeyDirty = !sameHotkey(storedHotkey, draftHotkey);
   const selectedIsActive = selectedTargetId != null && selectedTargetId === activeTargetId;
@@ -185,6 +188,7 @@ function SettingsApp() {
             'connectionStatus',
             'activeTargetId',
             'autoLogin',
+            EDA_FONT_FAMILY_STORAGE_KEY,
             EDA_THEME_MODE_STORAGE_KEY,
           ]),
         ]);
@@ -199,6 +203,7 @@ function SettingsApp() {
         setStatus(loadedStatus);
         setActiveTargetId(loadedActiveId);
         setAutoLogin(!!stored.autoLogin);
+        setFontFamily(normalizeStoredFontFamily(stored[EDA_FONT_FAMILY_STORAGE_KEY]));
         setThemeMode(normalizeStoredThemeMode(stored[EDA_THEME_MODE_STORAGE_KEY]));
 
         let appliedDraft = false;
@@ -267,6 +272,10 @@ function SettingsApp() {
 
       if (changes.autoLogin) {
         setAutoLogin(!!changes.autoLogin.newValue);
+      }
+
+      if (changes[EDA_FONT_FAMILY_STORAGE_KEY]) {
+        setFontFamily(normalizeStoredFontFamily(changes[EDA_FONT_FAMILY_STORAGE_KEY].newValue));
       }
 
       if (changes[EDA_THEME_MODE_STORAGE_KEY]) {

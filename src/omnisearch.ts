@@ -1,5 +1,5 @@
 import { api } from './core/api';
-import { detectThemeModeFromDocument } from './core/theme-mode';
+import { detectPreferredFontFamilyFromDocument, detectThemeModeFromDocument } from './core/theme-mode';
 import {
   DEFAULT_OMNISEARCH_HOTKEY,
   OMNISEARCH_HOTKEY_STORAGE_KEY,
@@ -224,7 +224,11 @@ function getAllItems(): NavItem[] {
 }
 
 function createOmnisearch(): HTMLDivElement {
-  return createOmnisearchOverlay(OMNISEARCH_ID, detectThemeModeFromDocument());
+  return createOmnisearchOverlay(
+    OMNISEARCH_ID,
+    detectThemeModeFromDocument(),
+    detectPreferredFontFamilyFromDocument(),
+  );
 }
 
 function renderResults(

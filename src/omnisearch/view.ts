@@ -129,6 +129,7 @@ function pickTableColumns(rows: Array<Map<string, string>>): string[] {
 export function createOmnisearchOverlay(
   omnisearchId: string,
   mode: ThemeMode = 'dark',
+  fontFamily: string | null = null,
 ): HTMLDivElement {
   const existing = document.getElementById(omnisearchId);
   if (existing) existing.remove();
@@ -161,6 +162,7 @@ export function createOmnisearchOverlay(
   const style = document.createElement('style');
   style.textContent = `
     #${omnisearchId} {
+      --eda-omnisearch-font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
       --eda-omnisearch-backdrop-bg: rgba(0, 0, 0, 0.5);
       --eda-omnisearch-panel-bg: #1a222e;
       --eda-omnisearch-border: #4a536180;
@@ -224,7 +226,8 @@ export function createOmnisearchOverlay(
       box-shadow: var(--eda-omnisearch-shadow);
       display: flex;
       flex-direction: column;
-      overflow: hidden; font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+      overflow: hidden;
+      font-family: var(--eda-omnisearch-font-family);
       color: var(--eda-omnisearch-text-primary);
     }
     .eda-omnisearch-input-row {
@@ -388,6 +391,9 @@ export function createOmnisearchOverlay(
     .eda-omnisearch-highlight { color: var(--eda-omnisearch-highlight); font-weight: 600; }
   `;
   overlay.prepend(style);
+  if (fontFamily) {
+    overlay.style.setProperty('--eda-omnisearch-font-family', fontFamily);
+  }
   return overlay;
 }
 
