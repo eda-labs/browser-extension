@@ -15,6 +15,7 @@ pnpm install
 - `pnpm run build`: production build to `dist/`
 - `pnpm run watch`: rebuild on source changes
 - `pnpm run dev`: build and launch in Firefox via `web-ext run`
+- `pnpm run dev:chromium`: build and launch Chromium with the extension loaded, then open the EDA URL from `.env`
 - `pnpm run typecheck`: TypeScript checks (`tsc --noEmit`)
 - `pnpm run lint`: lint built extension with `web-ext lint`
 - `pnpm run package`: build + lint + create extension package
@@ -22,24 +23,12 @@ pnpm install
 
 ## Dev Launcher (Chromium + .env)
 
-You can start Chromium with the extension installed and pre-configured from `.env`:
+`pnpm run dev:chromium` expects a `.env` file in the repo root. Start from `.env.example`.
 
-1. Create `.env` from `.env.example` and set your values.
-2. Run:
+Useful variables:
 
-```bash
-pnpm run dev:chromium:env
-```
-
-Useful options:
-
-- `EDA_CLIENT_SECRET`: if left empty, the launcher fetches it using `EDA_KC_USERNAME` / `EDA_KC_PASSWORD`.
-- `EDA_RESET_PROFILE=true|false`: wipe persistent Chromium profile before launch (default `true`).
-- `EDA_KEEP_OPEN=true|false`: keep browser running until Ctrl+C (default `true` when not headless).
-- `EDA_DIRECT_LOGIN_FALLBACK=true|false`: if Keycloak login is visible, fill and submit it directly with `EDA_USERNAME` / `EDA_PASSWORD` (default `true`).
-- `EDA_HEADLESS=true|false`: run headless (default `false`).
-- `EDA_ENV_FILE=/path/to/file`: use a custom env file path.
-- `pnpm run dev:chromium:env:no-build`: skip extension rebuild.
+- `EDA_URL`: required base URL to open.
+- `EDA_OPEN_URL=https://...`: optional page to open instead of `EDA_URL`.
 
 ## Browser Support
 
