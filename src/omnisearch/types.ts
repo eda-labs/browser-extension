@@ -1,8 +1,11 @@
+export type NavItemType = 'action' | 'page' | 'resource' | 'instance';
+
 export interface NavItem {
   label: string;
   href: string;
   section: string;
   keywords: string;
+  itemType?: NavItemType;
 }
 
 export interface EqlResult {

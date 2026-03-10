@@ -21,7 +21,7 @@ import KeyboardReturnIcon from '@mui/icons-material/KeyboardReturn';
 import type { ThemeMode } from '../core/theme-mode';
 import type { EqlAutocompleteItem, EqlResult, NavItem } from './types';
 import { flattenResultFields, pickTableColumns, processEqlResponse, processEqlAutocompleteResponse } from './eql';
-import { scoreMatch } from './search';
+import { navItemTypeSortOrder, scoreMatch } from './search';
 import { navigate } from './navigation';
 import {
   EQL_AUTOCOMPLETE_REQUEST_MSG,
@@ -341,36 +341,50 @@ export function OmnisearchOverlay({ mode, fontFamily, getNavState, onClose, subs
     selected?.scrollIntoView({ block: 'nearest' });
   }, [selectedIndex, eqlMode]);
 
-  // Filtered nav items - preserves section ordering, filters within sections by score
+  // Filtered nav items - rank by match quality, then sort within sections
   const filteredItems = useMemo(() => {
     if (eqlMode) return [];
     const { items } = getNavState();
     const q = query.toLowerCase().trim();
     if (!q) return items;
+
     const scored = items
       .map((item) => ({ item, score: scoreMatch(item, q) }))
       .filter((s) => s.score >= 0);
-    // Group by section preserving original section order
-    const sectionOrder: string[] = [];
-    const sectionItems = new Map<string, typeof scored>();
-    for (const s of scored) {
-      const sec = s.item.section;
-      if (!sectionItems.has(sec)) {
-        sectionOrder.push(sec);
-        sectionItems.set(sec, []);
+
+    const sectionMeta = new Map<string, { entries: typeof scored; bestScore: number; firstHitIndex: number }>();
+    scored.forEach((entry, index) => {
+      const key = entry.item.section;
+      const meta = sectionMeta.get(key);
+      if (meta) {
+        meta.entries.push(entry);
+        if (entry.score > meta.bestScore) meta.bestScore = entry.score;
+        return;
       }
-      const sectionGroup = sectionItems.get(sec);
-      if (sectionGroup) sectionGroup.push(s);
-    }
-    // Sort within each section by score, then flatten
+      sectionMeta.set(key, {
+        entries: [entry],
+        bestScore: entry.score,
+        firstHitIndex: index,
+      });
+    });
+
+    const orderedSections = Array.from(sectionMeta.values()).sort((a, b) => {
+      if (a.bestScore !== b.bestScore) return b.bestScore - a.bestScore;
+      return a.firstHitIndex - b.firstHitIndex;
+    });
+
     const result: NavItem[] = [];
-    for (const sec of sectionOrder) {
-      const group = sectionItems.get(sec);
-      if (!group) continue;
-      group.sort((a, b) => b.score - a.score);
-      for (const s of group) result.push(s.item);
+    for (const section of orderedSections) {
+      section.entries.sort((a, b) => {
+        if (a.score !== b.score) return b.score - a.score;
+        const typeOrder = navItemTypeSortOrder(a.item) - navItemTypeSortOrder(b.item);
+        if (typeOrder !== 0) return typeOrder;
+        return a.item.label.localeCompare(b.item.label);
+      });
+      for (const entry of section.entries) result.push(entry.item);
     }
     return result;
+
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [query, eqlMode, navVersion]);
 

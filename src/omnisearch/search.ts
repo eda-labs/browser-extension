@@ -39,24 +39,63 @@ const SECTION_ORDER: Record<string, number> = {
   Page: 99,
 };
 
+const ITEM_TYPE_BASE_ADJUSTMENT = {
+  action: 16,
+  page: 12,
+  resource: 18,
+  instance: -24,
+} as const;
+
+const ITEM_TYPE_SORT_ORDER = {
+  resource: 0,
+  action: 1,
+  page: 2,
+  instance: 3,
+} as const;
+
+export function navItemTypeSortOrder(item: NavItem): number {
+  if (!item.itemType) return 1;
+  return ITEM_TYPE_SORT_ORDER[item.itemType] ?? 1;
+}
+
+function itemTypeScoreAdjustment(item: NavItem, query: string): number {
+  const type = item.itemType;
+  if (!type) return 0;
+
+  if (type === 'instance') {
+    const looksSpecific =
+      query.length >= 14 ||
+      /[/:._-]/.test(query) ||
+      query.trim().split(/\s+/).length > 1;
+    return looksSpecific ? -8 : ITEM_TYPE_BASE_ADJUSTMENT.instance;
+  }
+
+  return ITEM_TYPE_BASE_ADJUSTMENT[type] ?? 0;
+}
+
 export function scoreMatch(item: NavItem, query: string): number {
   const label = item.label.toLowerCase();
   const href = item.href.toLowerCase();
   const keywords = item.keywords.toLowerCase();
+  let rawScore = -1;
 
-  if (label === query) return 100;
-  if (label.startsWith(query)) return 90;
+  if (label === query) rawScore = 100;
+  else if (label.startsWith(query)) rawScore = 90;
 
   const words = label.split(/\s+/);
-  if (words.some((word) => word.startsWith(query))) return 80;
+  if (rawScore < 0 && words.some((word) => word.startsWith(query))) rawScore = 80;
 
-  if (label.includes(query)) return 70;
-  if (keywords.includes(query)) return 60;
-  if (href.includes(query)) return 50;
+  if (rawScore < 0 && label.includes(query)) rawScore = 70;
+  if (rawScore < 0 && keywords.includes(query)) rawScore = 60;
+  if (rawScore < 0 && href.includes(query)) rawScore = 50;
 
   const queryWords = query.split(/\s+/);
-  if (queryWords.length > 1 && queryWords.every((queryWord) => label.includes(queryWord) || keywords.includes(queryWord) || href.includes(queryWord))) {
-    return 40;
+  if (
+    rawScore < 0 &&
+    queryWords.length > 1 &&
+    queryWords.every((queryWord) => label.includes(queryWord) || keywords.includes(queryWord) || href.includes(queryWord))
+  ) {
+    rawScore = 40;
   }
 
   // Fuzzy subsequence: characters must appear in order with limited gaps
@@ -70,9 +109,10 @@ export function scoreMatch(item: NavItem, query: string): number {
       queryIndex += 1;
     }
   }
-  if (queryIndex === query.length && maxGap <= 3) return 20;
+  if (rawScore < 0 && queryIndex === query.length && maxGap <= 3) rawScore = 20;
 
-  return -1;
+  if (rawScore < 0) return -1;
+  return rawScore + itemTypeScoreAdjustment(item, query);
 }
 
 export function dedupeAndSortItems(items: NavItem[]): NavItem[] {

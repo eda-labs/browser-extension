@@ -86,7 +86,7 @@ export function processAppsPayload(data: unknown, quickActions: NavItem[]): NavI
     seen.add(href);
     const label = humanizeLabel(name);
     const section = href.includes('system_administration') ? 'Administration' : 'Quick Actions';
-    items.push({ label, href, section, keywords: `${name} ${label.toLowerCase()}` });
+    items.push({ label, href, section, keywords: `${name} ${label.toLowerCase()}`, itemType: 'page' });
   }
 
   const fabricsEntry = (data as ParsedKind[]).find((entry) => isFabricsQuickActionCandidate(entry));
@@ -99,6 +99,7 @@ export function processAppsPayload(data: unknown, quickActions: NavItem[]): NavI
         href,
         section: 'Quick Actions',
         keywords: 'fabrics fabric',
+        itemType: 'action',
       });
     }
   }
@@ -131,7 +132,7 @@ export function processAppsPayload(data: unknown, quickActions: NavItem[]): NavI
         'instance',
       ].join(' ');
 
-      items.push({ label, href, section, keywords });
+      items.push({ label, href, section, keywords, itemType: 'instance' });
       continue;
     }
 
@@ -143,7 +144,7 @@ export function processAppsPayload(data: unknown, quickActions: NavItem[]): NavI
     const section = entry.category || groupToSection(entry.group) || 'Resources';
     const keywords = `${label.toLowerCase()} ${entry.plural.toLowerCase()} ${(entry.kind || '').toLowerCase()} ${entry.group.toLowerCase()}`;
 
-    items.push({ label, href, section, keywords });
+    items.push({ label, href, section, keywords, itemType: 'resource' });
   }
 
   return items;
