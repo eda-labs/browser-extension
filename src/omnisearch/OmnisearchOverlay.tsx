@@ -169,6 +169,10 @@ export interface NavState {
   loading: boolean;
   error: string;
   bridgeReady: boolean;
+  loadingStartedAt: number;
+  loadingPhase: 'none' | 'apps' | 'resources';
+  loadedAt: number;
+  lastLoadDurationMs: number;
 }
 
 export interface OmnisearchOverlayProps {
@@ -198,6 +202,7 @@ export function OmnisearchOverlay({ mode, fontFamily, getNavState, onClose, subs
 
   // Nav state versioning
   const [navVersion, setNavVersion] = useState(0);
+  const [loadingClockMs, setLoadingClockMs] = useState(() => Date.now());
 
   const inputRef = useRef<HTMLInputElement>(null);
   const completionsRef = useRef<HTMLDivElement>(null);
@@ -223,6 +228,17 @@ export function OmnisearchOverlay({ mode, fontFamily, getNavState, onClose, subs
 
   // Subscribe to nav state changes
   useEffect(() => subscribeNavUpdate(() => setNavVersion((v) => v + 1)), [subscribeNavUpdate]);
+
+  useEffect(() => {
+    const state = getNavState();
+    if (!state.loading) return;
+    const timer = window.setInterval(() => {
+      setLoadingClockMs(Date.now());
+    }, 1000);
+    return () => {
+      window.clearInterval(timer);
+    };
+  }, [getNavState, navVersion]);
 
   // EQL message listener
   useEffect(() => {
@@ -408,9 +424,21 @@ export function OmnisearchOverlay({ mode, fontFamily, getNavState, onClose, subs
 
   // Nav empty message
   function getEmptyMessage(): string {
-    const { loading, error, bridgeReady, items } = getNavState();
+    const { loading, loadingPhase, error, bridgeReady, items, loadingStartedAt } = getNavState();
+    const elapsedSeconds = loadingStartedAt > 0
+      ? Math.max(0, Math.floor((loadingClockMs - loadingStartedAt) / 1000))
+      : 0;
     if (!bridgeReady) return 'Initializing EDA search bridge...';
-    if (loading && items.length === 0) return 'Loading EDA pages...';
+    if (loading && items.length === 0) {
+      return loadingPhase === 'resources'
+        ? `Loading resource instances... ${elapsedSeconds}s`
+        : `Loading app catalog... ${elapsedSeconds}s`;
+    }
+    if (loading) {
+      return loadingPhase === 'resources'
+        ? `Loading resource instances... ${elapsedSeconds}s`
+        : `Loading app catalog... ${elapsedSeconds}s`;
+    }
     if (error && items.length === 0) return `Could not load pages: ${error}`;
     const q = query.toLowerCase().trim();
     if (!q && items.length === 0) return 'No pages discovered yet';
@@ -486,8 +514,31 @@ export function OmnisearchOverlay({ mode, fontFamily, getNavState, onClose, subs
       if (eqlResults.length > 0) return `${eqlResults.length} EQL result${eqlResults.length !== 1 ? 's' : ''}`;
       return '';
     }
-    return `${filteredItems.length} result${filteredItems.length !== 1 ? 's' : ''}`;
-  }, [eqlMode, eqlResults.length, filteredItems.length]);
+    const navState = getNavState();
+    const base = `${filteredItems.length} result${filteredItems.length !== 1 ? 's' : ''}`;
+    if (navState.loading && navState.loadingStartedAt > 0) {
+      const elapsedSeconds = Math.max(0, Math.floor((loadingClockMs - navState.loadingStartedAt) / 1000));
+      return `${base} | loading ${elapsedSeconds}s`;
+    }
+    if (navState.loadedAt > 0 && navState.lastLoadDurationMs > 0) {
+      const loadedSeconds = Math.max(1, Math.round(navState.lastLoadDurationMs / 1000));
+      return `${base} | loaded in ${loadedSeconds}s`;
+    }
+    return base;
+  }, [eqlMode, eqlResults.length, filteredItems.length, loadingClockMs, navVersion]);
+
+  const loadingBannerText = useMemo(() => {
+    if (eqlMode) return '';
+    const navState = getNavState();
+    if (navState.loading && navState.loadingStartedAt > 0) {
+      const elapsedSeconds = Math.max(0, Math.floor((loadingClockMs - navState.loadingStartedAt) / 1000));
+      if (navState.loadingPhase === 'resources') {
+        return `Loading resource instances... ${elapsedSeconds}s`;
+      }
+      return `Loading app catalog... ${elapsedSeconds}s`;
+    }
+    return '';
+  }, [eqlMode, loadingClockMs, navVersion]);
 
   // Completions dropdown visibility
   const completionsOpen =
@@ -889,6 +940,22 @@ export function OmnisearchOverlay({ mode, fontFamily, getNavState, onClose, subs
                   </Paper>
                 )}
               </Box>
+
+              {loadingBannerText && (
+                <Box
+                  sx={{
+                    px: 2,
+                    py: 0.75,
+                    borderBottom: '1px solid',
+                    borderColor: 'divider',
+                    fontSize: 11,
+                    color: colors.textMuted,
+                    bgcolor: colors.accentWeak,
+                  }}
+                >
+                  {loadingBannerText}
+                </Box>
+              )}
 
               {/* Results */}
               <Box ref={resultsRef} sx={{ overflowY: 'auto', flex: 1, maxHeight: 'calc(60vh - 90px)' }}>

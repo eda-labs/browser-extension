@@ -45,6 +45,7 @@ const FAST_INSTANCE_ITEMS_PER_RESOURCE = 80;
 const FAST_INSTANCE_TOTAL_LIMIT = 1200;
 const FAST_INSTANCE_EQL_QUERY_LIMIT = 120;
 const FAST_INSTANCE_FETCH_CONCURRENCY = 12;
+const GROUP_FETCH_CONCURRENCY = 8;
 
 interface EdaResponsePayload {
   ok: boolean;
@@ -389,11 +390,11 @@ async function fetchAllResources(force: boolean): Promise<void> {
 
   if (state.fetching) return;
 
-  const now = Date.now();
-  if (!force && state.cachedItems.length > 0 && now - state.lastFetchTs < CACHE_TTL_MS) {
-    post(APPS_RESPONSE_MSG, { data: state.cachedItems, cached: true });
-    return;
-  }
+    const now = Date.now();
+    if (!force && state.cachedItems.length > 0 && now - state.lastFetchTs < CACHE_TTL_MS) {
+      post(APPS_RESPONSE_MSG, { data: state.cachedItems, cached: true, loading: false });
+      return;
+    }
 
   state.fetching = true;
   try {
@@ -410,17 +411,54 @@ async function fetchAllResources(force: boolean): Promise<void> {
     const groups = groupsRaw
       .filter((groupRaw): groupRaw is AppsGroup => Boolean(groupRaw) && typeof groupRaw === 'object');
 
-    const groupResults = await Promise.all(groups.map(async (group) => {
+    const groupPlans: Array<{ groupName: string; version: string }> = [];
+    for (const group of groups) {
       const groupName = typeof group.name === 'string' ? group.name : '';
       const version = pickVersion(group);
-      if (!groupName || !version) return [];
-      return fetchGroupItems(groupName, version).catch(() => []);
-    }));
+      if (!groupName || !version) continue;
+      groupPlans.push({ groupName, version });
+    }
 
-    const flattened = groupResults.flat();
-    state.cachedItems = flattened;
-    state.lastFetchTs = Date.now();
-    post(APPS_RESPONSE_MSG, { data: flattened });
+    if (groupPlans.length === 0) {
+      state.cachedItems = [];
+      state.lastFetchTs = Date.now();
+      post(APPS_RESPONSE_MSG, { data: [], partial: false, loading: false });
+      return;
+    }
+
+    const groupResults: ParsedKind[][] = Array.from({ length: groupPlans.length }, () => []);
+    let publishedBaseCount = 0;
+
+    function publishBase(partial: boolean, force = false): ParsedKind[] {
+      const merged = mergeParsedKinds(...groupResults);
+      if (!force && merged.length <= publishedBaseCount) return merged;
+      publishedBaseCount = merged.length;
+      const latestState = getState();
+      latestState.cachedItems = merged;
+      latestState.lastFetchTs = Date.now();
+      post(APPS_RESPONSE_MSG, {
+        data: merged,
+        partial,
+        loading: true,
+        phase: partial ? 'apps' : 'resources',
+      });
+      return merged;
+    }
+
+    let nextGroupIndex = 0;
+    async function groupWorker(): Promise<void> {
+      while (nextGroupIndex < groupPlans.length) {
+        const index = nextGroupIndex++;
+        const group = groupPlans[index];
+        groupResults[index] = await fetchGroupItems(group.groupName, group.version).catch(() => []);
+        publishBase(true);
+      }
+    }
+
+    const workerCount = Math.min(GROUP_FETCH_CONCURRENCY, groupPlans.length);
+    await Promise.all(Array.from({ length: workerCount }, () => groupWorker()));
+
+    const flattened = publishBase(false, true);
 
     void (async () => {
       const uniqueResources = new Map<string, ParsedKind>();
@@ -448,15 +486,22 @@ async function fetchAllResources(force: boolean): Promise<void> {
       const fastSeen = new Set<string>();
       const slowSeen = new Set<string>();
       let lastPublishedCount = flattened.length;
+      let latestMerged = flattened;
 
       function publishMerged(): void {
         const merged = mergeParsedKinds(flattened, fastInstanceItems, slowInstanceItems);
         if (merged.length <= lastPublishedCount) return;
         lastPublishedCount = merged.length;
-        const latestState = getState();
-        latestState.cachedItems = merged;
-        latestState.lastFetchTs = Date.now();
-        post(APPS_RESPONSE_MSG, { data: merged, enriched: true });
+        latestMerged = merged;
+        const latestEnrichedState = getState();
+        latestEnrichedState.cachedItems = merged;
+        latestEnrichedState.lastFetchTs = Date.now();
+        post(APPS_RESPONSE_MSG, {
+          data: merged,
+          enriched: true,
+          loading: true,
+          phase: 'resources',
+        });
       }
 
       function appendItems(target: ParsedKind[], targetSeen: Set<string>, items: ParsedKind[]): void {
@@ -468,9 +513,7 @@ async function fetchAllResources(force: boolean): Promise<void> {
           target.push(item);
           changed = true;
         }
-        if (changed) {
-          publishMerged();
-        }
+        if (changed) publishMerged();
       }
 
       if (fastResources.length > 0) {
@@ -504,11 +547,25 @@ async function fetchAllResources(force: boolean): Promise<void> {
           // Preserve base resource results even if enrichment fails.
         }
       }
+
+      const finalMerged = mergeParsedKinds(flattened, fastInstanceItems, slowInstanceItems);
+      latestMerged = finalMerged.length > latestMerged.length ? finalMerged : latestMerged;
+      const latestDoneState = getState();
+      latestDoneState.cachedItems = latestMerged;
+      latestDoneState.lastFetchTs = Date.now();
+      post(APPS_RESPONSE_MSG, {
+        data: latestMerged,
+        enriched: true,
+        loading: false,
+        done: true,
+        phase: 'resources',
+      });
     })();
   } catch (err) {
     post(APPS_RESPONSE_MSG, {
       data: state.cachedItems,
       error: getErrorMessage(err),
+      loading: false,
     });
   } finally {
     state.fetching = false;

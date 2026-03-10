@@ -55,6 +55,18 @@ function groupToSection(group: string): string | undefined {
   return GROUP_TO_SECTION[group];
 }
 
+function buildResourceHref(entry: ParsedKind): string {
+  const panel = entry.panel || getPanel(entry.group, entry.plural);
+  return `/ui/app/${panel}/${encodeURIComponent(entry.group)}/${encodeURIComponent(entry.version)}/${encodeURIComponent(entry.plural)}`;
+}
+
+function isFabricsQuickActionCandidate(entry: ParsedKind): boolean {
+  if (entry.isInstance) return false;
+  const group = (entry.group || '').toLowerCase();
+  const plural = (entry.plural || '').toLowerCase();
+  return group === 'fabrics.eda.nokia.com' && plural === 'fabrics';
+}
+
 export function humanizeLabel(text: string): string {
   return text
     .replace(/([a-z])([A-Z])/g, '$1 $2')
@@ -77,10 +89,23 @@ export function processAppsPayload(data: unknown, quickActions: NavItem[]): NavI
     items.push({ label, href, section, keywords: `${name} ${label.toLowerCase()}` });
   }
 
+  const fabricsEntry = (data as ParsedKind[]).find((entry) => isFabricsQuickActionCandidate(entry));
+  if (fabricsEntry) {
+    const href = buildResourceHref(fabricsEntry);
+    if (!seen.has(href)) {
+      seen.add(href);
+      items.push({
+        label: 'Fabrics',
+        href,
+        section: 'Quick Actions',
+        keywords: 'fabrics fabric',
+      });
+    }
+  }
+
   for (const entry of data as ParsedKind[]) {
     if (!entry.plural || !entry.group || !entry.version) continue;
-    const panel = entry.panel || getPanel(entry.group, entry.plural);
-    const href = `/ui/app/${panel}/${encodeURIComponent(entry.group)}/${encodeURIComponent(entry.version)}/${encodeURIComponent(entry.plural)}`;
+    const href = buildResourceHref(entry);
 
     if (entry.isInstance) {
       const instanceName = (entry.instanceName || entry.label || '').trim();
@@ -111,7 +136,7 @@ export function processAppsPayload(data: unknown, quickActions: NavItem[]): NavI
     }
 
     const resourceKey = `resource:${href}`;
-    if (seen.has(resourceKey)) continue;
+    if (seen.has(resourceKey) || seen.has(href)) continue;
     seen.add(resourceKey);
 
     const label = humanizeLabel(entry.label || entry.kind || entry.plural);

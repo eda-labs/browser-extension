@@ -34,6 +34,10 @@ let apiLoading = false;
 let apiError = '';
 let bridgeReady = false;
 let appsRequestTimeout: ReturnType<typeof setTimeout> | null = null;
+let appsLoadingStartedAt = 0;
+let apiLoadingPhase: 'none' | 'apps' | 'resources' = 'none';
+let appsLoadedAt = 0;
+let appsLastLoadDurationMs = 0;
 
 const navStateListeners = new Set<() => void>();
 function notifyNavStateChange() {
@@ -52,6 +56,10 @@ function getNavState(): NavState {
     loading: apiLoading,
     error: apiError,
     bridgeReady,
+    loadingStartedAt: appsLoadingStartedAt,
+    loadingPhase: apiLoadingPhase,
+    loadedAt: appsLoadedAt,
+    lastLoadDurationMs: appsLastLoadDurationMs,
   };
 }
 
@@ -94,11 +102,21 @@ function processAppsResponse(data: unknown): boolean {
 }
 
 function requestApps(force = false): void {
+  if (!apiLoading) {
+    appsLoadingStartedAt = Date.now();
+  }
   apiLoading = true;
+  apiLoadingPhase = 'apps';
+  appsLoadedAt = 0;
+  appsLastLoadDurationMs = 0;
   if (appsRequestTimeout) clearTimeout(appsRequestTimeout);
   appsRequestTimeout = setTimeout(() => {
     if (!apiLoading) return;
     apiLoading = false;
+    apiLoadingPhase = 'none';
+    appsLoadingStartedAt = 0;
+    appsLoadedAt = 0;
+    appsLastLoadDurationMs = 0;
     apiError = bridgeReady ? 'Waiting for EDA API response' : 'Search bridge did not initialize';
     notifyNavStateChange();
   }, 8_000);
@@ -130,7 +148,30 @@ function setupMessageListener(): void {
         clearTimeout(appsRequestTimeout);
         appsRequestTimeout = null;
       }
-      apiLoading = false;
+      const explicitLoading = typeof data.loading === 'boolean' ? data.loading : null;
+      if (explicitLoading != null) {
+        apiLoading = explicitLoading;
+      } else {
+        const isPartialResponse = Boolean(data.partial);
+        apiLoading = isPartialResponse;
+      }
+
+      if (apiLoading) {
+        if (!appsLoadingStartedAt) appsLoadingStartedAt = Date.now();
+        apiLoadingPhase = String(data.phase || '') === 'resources' ? 'resources' : 'apps';
+        appsLoadedAt = 0;
+        appsLastLoadDurationMs = 0;
+      } else {
+        if (appsLoadingStartedAt > 0) {
+          appsLastLoadDurationMs = Math.max(0, Date.now() - appsLoadingStartedAt);
+          appsLoadedAt = Date.now();
+        } else {
+          appsLastLoadDurationMs = 0;
+          appsLoadedAt = 0;
+        }
+        appsLoadingStartedAt = 0;
+        apiLoadingPhase = 'none';
+      }
 
       const responseError = typeof data.error === 'string' ? data.error : '';
       if (responseError && apiItems.length === 0) {
