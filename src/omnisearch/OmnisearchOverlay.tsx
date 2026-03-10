@@ -1,7 +1,8 @@
-import React, { useState, useEffect, useRef, useMemo, useCallback, createContext, useContext } from 'react';
+import React, { useState, useEffect, useRef, useMemo, useCallback } from 'react';
 import {
   createTheme,
   ThemeProvider,
+  useTheme,
   Box,
   InputBase,
   Typography,
@@ -43,9 +44,9 @@ function getEmotionCache() {
   return _emotionCache;
 }
 
-// ── Custom colors ──
+// ── MUI theme augmentation ──
 
-interface CustomColors {
+interface CustomPalette {
   textStrong: string;
   textMuted: string;
   textSubtle: string;
@@ -61,7 +62,16 @@ interface CustomColors {
   backdropBg: string;
 }
 
-const DARK_COLORS: CustomColors = {
+declare module '@mui/material/styles' {
+  interface Palette {
+    custom: CustomPalette;
+  }
+  interface PaletteOptions {
+    custom?: CustomPalette;
+  }
+}
+
+const DARK_CUSTOM: CustomPalette = {
   textStrong: '#dde5f2',
   textMuted: '#c9ced680',
   textSubtle: '#c9ced650',
@@ -77,7 +87,7 @@ const DARK_COLORS: CustomColors = {
   backdropBg: 'rgba(0,0,0,0.5)',
 };
 
-const LIGHT_COLORS: CustomColors = {
+const LIGHT_CUSTOM: CustomPalette = {
   textStrong: '#1f2f45',
   textMuted: '#42526a99',
   textSubtle: '#42526a80',
@@ -93,9 +103,6 @@ const LIGHT_COLORS: CustomColors = {
   backdropBg: 'rgba(15,23,42,0.28)',
 };
 
-const ColorsContext = createContext<CustomColors>(DARK_COLORS);
-const useColors = () => useContext(ColorsContext);
-
 // ── Theme ──
 
 function createOmnisearchTheme(mode: ThemeMode, fontFamily: string | null) {
@@ -107,6 +114,7 @@ function createOmnisearchTheme(mode: ThemeMode, fontFamily: string | null) {
       background: { default: isDark ? '#1a222e' : '#ffffff', paper: isDark ? '#1a222e' : '#ffffff' },
       text: { primary: isDark ? '#ffffff' : '#152033', secondary: isDark ? '#c9ced6' : '#42526a' },
       divider: isDark ? '#4a536180' : '#d6dce8',
+      custom: isDark ? DARK_CUSTOM : LIGHT_CUSTOM,
     },
     typography: {
       fontFamily: fontFamily || '-apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif',
@@ -117,7 +125,7 @@ function createOmnisearchTheme(mode: ThemeMode, fontFamily: string | null) {
 // ── Sub-components ──
 
 function Kbd({ children, footer }: { children: React.ReactNode; footer?: boolean }) {
-  const c = useColors();
+  const c = useTheme().palette.custom;
   return (
     <Box
       component="span"
@@ -175,7 +183,7 @@ export interface OmnisearchOverlayProps {
 
 export function OmnisearchOverlay({ mode, fontFamily, getNavState, onClose, subscribeNavUpdate }: OmnisearchOverlayProps) {
   const theme = useMemo(() => createOmnisearchTheme(mode, fontFamily), [mode, fontFamily]);
-  const colors = mode === 'light' ? LIGHT_COLORS : DARK_COLORS;
+  const colors = theme.palette.custom;
 
   const [query, setQuery] = useState('');
   const [selectedIndex, setSelectedIndex] = useState(0);
@@ -793,7 +801,6 @@ export function OmnisearchOverlay({ mode, fontFamily, getNavState, onClose, subs
   return (
     <CacheProvider value={getEmotionCache()}>
       <ThemeProvider theme={theme}>
-        <ColorsContext.Provider value={colors}>
           {/* Overlay container */}
           <Box
             sx={{
@@ -922,7 +929,6 @@ export function OmnisearchOverlay({ mode, fontFamily, getNavState, onClose, subs
               </Box>
             </Paper>
           </Box>
-        </ColorsContext.Provider>
       </ThemeProvider>
     </CacheProvider>
   );
