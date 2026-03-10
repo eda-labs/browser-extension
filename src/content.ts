@@ -4,7 +4,24 @@ import { postCurrentStatus, handlePageMessage, handleStorageChange } from './cor
 
 const PAGE_TARGET_ORIGIN = window.location.origin === 'null' ? '*' : window.location.origin;
 let spotlightInitialized = false;
+let spotlightInterceptorInitialized = false;
 let keepaliveConnected = false;
+let spotlightModulePromise: Promise<typeof import('./spotlight')> | null = null;
+
+function getSpotlightModule(): Promise<typeof import('./spotlight')> {
+  if (!spotlightModulePromise) {
+    spotlightModulePromise = import('./spotlight');
+  }
+  return spotlightModulePromise;
+}
+
+async function ensureSpotlightInterceptor(): Promise<void> {
+  if (spotlightInterceptorInitialized) return;
+  const { injectSpotlightInterceptor } = await getSpotlightModule();
+  if (spotlightInterceptorInitialized) return;
+  injectSpotlightInterceptor();
+  spotlightInterceptorInitialized = true;
+}
 
 function isEdaSite(): boolean {
   const desc = document.querySelector('meta[name="description"]');
@@ -139,13 +156,17 @@ function initEdaFeatures(): void {
   spotlightInitialized = true;
   void (async () => {
     try {
-      const { injectSpotlightInterceptor, initSpotlight } = await import('./spotlight');
-      injectSpotlightInterceptor();
+      await ensureSpotlightInterceptor();
+      const { initSpotlight } = await getSpotlightModule();
       initSpotlight();
     } catch {
       spotlightInitialized = false;
     }
   })();
+}
+
+if (location.pathname.startsWith('/ui/')) {
+  void ensureSpotlightInterceptor().catch(() => undefined);
 }
 
 if (document.readyState === 'loading') {

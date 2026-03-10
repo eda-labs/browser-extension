@@ -553,11 +553,12 @@ function closeSpotlightImmediately(): void {
 }
 
 /**
- * Initializes spotlight message listeners in the content script.
- * The page bridge script is injected lazily when spotlight opens.
+ * Initializes spotlight message listeners in the content script and
+ * injects the page bridge so auth token capture can start immediately.
  */
 export function injectSpotlightInterceptor(): void {
   setupMessageListener();
+  injectAppsFetcher();
 }
 
 export function initSpotlight(): void {

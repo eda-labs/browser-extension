@@ -3,9 +3,6 @@ import {
   APPS_REQUEST_MSG,
   APPS_RESPONSE_MSG,
   BRIDGE_READY_MSG,
-  EDA_REQUEST_CHANNEL,
-  EDA_REQUEST_MSG,
-  EDA_RESPONSE_MSG,
   EQL_AUTOCOMPLETE_REQUEST_MSG,
   EQL_AUTOCOMPLETE_RESPONSE_MSG,
   EQL_REQUEST_MSG,
@@ -28,6 +25,7 @@ const PAGE_TARGET_ORIGIN = window.location.origin === 'null' ? '*' : window.loca
 
 type SpotlightWindow = Window & {
   __edaExtSpotlightState?: {
+    token: string;
     cachedItems: ParsedKind[];
     lastFetchTs: number;
     fetching: boolean;
@@ -40,9 +38,6 @@ const INSTANCE_ITEMS_PER_RESOURCE = 250;
 const INSTANCE_FETCH_CONCURRENCY = 6;
 const INSTANCE_TOTAL_LIMIT = 8000;
 const INSTANCE_EQL_QUERY_LIMIT = 1000;
-const EDA_REQUEST_TIMEOUT_MS = 15_000;
-
-let edaReqCounter = 0;
 
 interface EdaResponsePayload {
   ok: boolean;
@@ -58,6 +53,7 @@ function getState(): NonNullable<SpotlightWindow['__edaExtSpotlightState']> {
   const w = window as SpotlightWindow;
   if (!w.__edaExtSpotlightState) {
     w.__edaExtSpotlightState = {
+      token: '',
       cachedItems: [],
       lastFetchTs: 0,
       fetching: false,
@@ -66,53 +62,89 @@ function getState(): NonNullable<SpotlightWindow['__edaExtSpotlightState']> {
   return w.__edaExtSpotlightState;
 }
 
-
-function nextEdaRequestId(): string {
-  edaReqCounter += 1;
-  return `eda-ext-spotlight-${Date.now()}-${edaReqCounter}`;
+function toHeadersList(headers: HeadersInit | undefined): Array<[string, string]> {
+  if (!headers) return [];
+  if (headers instanceof Headers) {
+    const out: Array<[string, string]> = [];
+    headers.forEach((value, key) => {
+      out.push([key, value]);
+    });
+    return out;
+  }
+  if (Array.isArray(headers)) {
+    return headers
+      .map((entry) => [String(entry[0]), String(entry[1])] as [string, string]);
+  }
+  return Object.entries(headers).map(([key, value]) => [key, String(value)]);
 }
 
-function sendEdaRequest(path: string, method = 'GET', body?: string): Promise<EdaResponsePayload> {
-  const id = nextEdaRequestId();
-  return new Promise((resolve, reject) => {
-    let timeoutId = 0;
+function captureTokenFromHeaders(headers: HeadersInit | undefined): void {
+  const state = getState();
+  for (const [name, value] of toHeadersList(headers)) {
+    if (name.toLowerCase() !== 'authorization') continue;
+    if (!value.startsWith('Bearer ')) continue;
+    const token = value.slice(7).trim();
+    if (!token || token === state.token) return;
 
-    function cleanup(): void {
-      window.clearTimeout(timeoutId);
-      window.removeEventListener('message', onMessage);
+    state.token = token;
+    state.cachedItems = [];
+    state.lastFetchTs = 0;
+    void fetchAllResources(true);
+    return;
+  }
+}
+
+function patchXhr(): void {
+  const proto = XMLHttpRequest.prototype as unknown as {
+    setRequestHeader: (name: string, value: string) => void;
+    __edaExtSpotlightPatched?: boolean;
+  };
+
+  if (proto.__edaExtSpotlightPatched) return;
+
+  const originalSetRequestHeader = proto.setRequestHeader;
+  proto.setRequestHeader = function patchedSetRequestHeader(name: string, value: string): void {
+    captureTokenFromHeaders([[name, value]]);
+    originalSetRequestHeader.call(this, name, value);
+  };
+  proto.__edaExtSpotlightPatched = true;
+}
+
+function patchFetch(): void {
+  const w = window as Window & { __edaExtSpotlightFetchPatched?: boolean };
+  if (w.__edaExtSpotlightFetchPatched) return;
+
+  const originalFetch = window.fetch.bind(window);
+  window.fetch = function patchedFetch(input: RequestInfo | URL, init?: RequestInit): Promise<Response> {
+    captureTokenFromHeaders(init?.headers);
+    if (input instanceof Request) {
+      captureTokenFromHeaders(input.headers);
     }
+    return originalFetch(input, init);
+  };
+  w.__edaExtSpotlightFetchPatched = true;
+}
 
-    function onMessage(event: MessageEvent): void {
-      if (event.source !== window) return;
-      if (window.location.origin !== 'null' && event.origin !== window.location.origin) return;
-      if (!event.data || typeof event.data !== 'object') return;
-      const data = event.data as Record<string, unknown>;
-      if (data.type !== EDA_RESPONSE_MSG) return;
-      if (data.channel !== EDA_REQUEST_CHANNEL) return;
-      if (data.id !== id) return;
-      cleanup();
-      resolve({
-        ok: Boolean(data.ok),
-        status: typeof data.status === 'number' ? data.status : 0,
-        body: data.body,
-      });
-    }
+async function sendEdaRequest(path: string, method = 'GET', body?: string): Promise<EdaResponsePayload> {
+  const state = getState();
+  if (!state.token) {
+    return { ok: false, status: 0, body: 'Waiting for EDA auth token' };
+  }
 
-    timeoutId = window.setTimeout(() => {
-      cleanup();
-      reject(new Error(`EDA request timed out (${method} ${path})`));
-    }, EDA_REQUEST_TIMEOUT_MS);
-
-    window.addEventListener('message', onMessage);
-    window.postMessage({
-      type: EDA_REQUEST_MSG,
-      channel: EDA_REQUEST_CHANNEL,
-      id,
-      path,
-      method,
-      body,
-    }, PAGE_TARGET_ORIGIN);
+  const response = await fetch(path, {
+    method,
+    headers: {
+      Authorization: `Bearer ${state.token}`,
+    },
+    body,
+    credentials: 'same-origin',
   });
+
+  return {
+    ok: response.ok,
+    status: response.status,
+    body: await response.text(),
+  };
 }
 
 async function fetchJson(url: string): Promise<unknown> {
@@ -401,5 +433,7 @@ function setupMessageBridge(): void {
   });
 }
 
+patchXhr();
+patchFetch();
 setupMessageBridge();
 post(BRIDGE_READY_MSG, { ok: true });
