@@ -11,8 +11,6 @@ import { tabIdByOrigin, tabOpenedAtByOrigin, doDirectFetch, doTabFetchFallback, 
 import { decodeJwtExp, fetchToken, fetchClientSecret } from './core/auth';
 import { initKeepalive, stopKeepalive } from './core/keepalive';
 
-const OMNISEARCH_REQUEST_CHANNEL = 'eda-ext-omnisearch-request';
-
 let state: EdaState = {
   status: 'disconnected',
   edaUrl: '',
@@ -27,60 +25,6 @@ let state: EdaState = {
 };
 
 initKeepalive();
-
-function normalizeOrigin(value: string): string {
-  try {
-    return new URL(value).origin;
-  } catch {
-    return '';
-  }
-}
-
-function normalizeOriginList(value: unknown): string[] {
-  if (!Array.isArray(value)) return [];
-  const out = new Set<string>();
-  for (const entry of value) {
-    if (typeof entry !== 'string') continue;
-    const origin = normalizeOrigin(entry);
-    if (origin) out.add(origin);
-  }
-  return Array.from(out);
-}
-
-async function isAuthorizedRequestOrigin(originRaw: string): Promise<boolean> {
-  const requestOrigin = normalizeOrigin(originRaw);
-  if (!requestOrigin) return false;
-
-  const activeTargetOrigin = normalizeOrigin(state.edaUrl);
-  if (activeTargetOrigin && requestOrigin === activeTargetOrigin) {
-    return true;
-  }
-
-  const stored = await api.storage.local.get(['allowedRequestOrigins']);
-  const allowedOrigins = normalizeOriginList(stored.allowedRequestOrigins);
-  return allowedOrigins.includes(requestOrigin);
-}
-
-function isInternalEdaUiRequest(
-  senderUrlRaw: string,
-  requestOriginRaw: string,
-  channelRaw: string,
-): boolean {
-  const senderOrigin = normalizeOrigin(senderUrlRaw);
-  const requestOrigin = normalizeOrigin(requestOriginRaw);
-  if (!senderOrigin || !requestOrigin || senderOrigin !== requestOrigin) {
-    return false;
-  }
-  if (channelRaw !== OMNISEARCH_REQUEST_CHANNEL) {
-    return false;
-  }
-  try {
-    const senderUrl = new URL(senderUrlRaw);
-    return senderUrl.pathname.startsWith('/ui/');
-  } catch {
-    return false;
-  }
-}
 
 function persistStatus(): void {
   void api.storage.local.set({
@@ -413,19 +357,6 @@ api.runtime.onMessage.addListener((message, sender, sendResponse) => {
     }
 
     if (message.type === 'eda-request') {
-      const requestOrigin = typeof message.requestOrigin === 'string' ? message.requestOrigin : '';
-      const channel = typeof message.channel === 'string' ? message.channel : '';
-      const senderUrl = sender.tab?.url ?? sender.url ?? '';
-      if (
-        !isInternalEdaUiRequest(senderUrl, requestOrigin, channel)
-        && !await isAuthorizedRequestOrigin(requestOrigin)
-      ) {
-        return {
-          ok: false,
-          status: 0,
-          body: 'Request origin is not authorized for the current EDA session',
-        };
-      }
       return handleRequest(
         message.path as string,
         message.method as string | undefined,
