@@ -83,6 +83,7 @@ let eqlAutocompleteLatestReqId = 0;
 let eqlAutocompleteItems: EqlAutocompleteItem[] = [];
 let eqlAutocompleteLoading = false;
 let eqlAutocompleteError = '';
+let eqlAutocompleteDebounceTimer = 0;
 let eqlRenderCallback: (() => void) | null = null;
 let messageListenerSetup = false;
 let currentHotkey: OmnisearchHotkey = DEFAULT_OMNISEARCH_HOTKEY;
@@ -404,6 +405,7 @@ function openOmnisearch() {
         eqlAutocompleteItems = [];
         eqlAutocompleteLoading = false;
         eqlAutocompleteError = '';
+        clearTimeout(eqlAutocompleteDebounceTimer);
         selectedIndex = 0;
         renderEqlResults(autocomplete, results, [], [], countEl, query);
         return;
@@ -411,7 +413,11 @@ function openOmnisearch() {
 
       selectedIndex = 0;
       sendEqlQuery(query);
-      sendEqlAutocompleteQuery(query);
+      clearTimeout(eqlAutocompleteDebounceTimer);
+      eqlAutocompleteDebounceTimer = window.setTimeout(() => {
+        sendEqlAutocompleteQuery(query);
+        renderCurrentEql();
+      }, 150);
       renderCurrentEql();
       return;
     }
@@ -444,6 +450,7 @@ function openOmnisearch() {
     eqlAutocompleteItems = [];
     eqlAutocompleteLoading = false;
     eqlAutocompleteError = '';
+    clearTimeout(eqlAutocompleteDebounceTimer);
     autocomplete.dataset.open = 'false';
     autocomplete.innerHTML = '';
     overlay.remove();
@@ -495,18 +502,42 @@ function openOmnisearch() {
     }
   }
 
+  function closeCompletions() {
+    eqlAutocompleteItems = [];
+    clearTimeout(eqlAutocompleteDebounceTimer);
+    autocomplete.dataset.open = 'false';
+    autocomplete.innerHTML = '';
+  }
+
   input.addEventListener('input', filter);
 
   input.addEventListener('keydown', (e) => {
     const maxIndex = eqlMode ? eqlAutocompleteItems.length - 1 : filteredItems.length - 1;
 
-    if (e.key === 'Tab' && eqlMode) {
-      if (applyAutocomplete()) {
-        e.preventDefault();
-      }
+    if (e.key === 'Backspace' && eqlMode && input.value === '.') {
+      e.preventDefault();
+      input.value = '';
+      eqlMode = false;
+      input.placeholder = 'Search EDA... (type . for EQL)';
+      eqlResults = [];
+      eqlError = '';
+      eqlLoading = false;
+      eqlCurrentQuery = '';
+      closeCompletions();
+      eqlAutocompleteLoading = false;
+      eqlAutocompleteError = '';
+      selectedIndex = 0;
+      renderCurrentNav('');
+    } else if (e.key === 'Tab' && eqlMode && eqlAutocompleteItems.length > 0) {
+      e.preventDefault();
+      applyAutocomplete();
     } else if (e.key === 'Escape') {
       e.preventDefault();
-      close();
+      if (eqlMode && eqlAutocompleteItems.length > 0) {
+        closeCompletions();
+      } else {
+        close();
+      }
     } else if (e.key === 'ArrowDown') {
       e.preventDefault();
       if (maxIndex < 0) return;
@@ -537,7 +568,11 @@ function openOmnisearch() {
       }
     } else if (e.key === 'Enter') {
       e.preventDefault();
-      selectCurrent();
+      if (eqlMode && eqlAutocompleteItems.length > 0) {
+        applyAutocomplete();
+      } else {
+        selectCurrent();
+      }
     }
   });
 
@@ -551,6 +586,15 @@ function openOmnisearch() {
     selectedIndex = autocompleteIdx;
     applyAutocomplete(autocompleteIdx);
   });
+
+  overlay.addEventListener('click', (e) => {
+    if (eqlMode && eqlAutocompleteItems.length > 0) {
+      const target = e.target as HTMLElement;
+      if (!target.closest('.eda-omnisearch-completions')) {
+        closeCompletions();
+      }
+    }
+  }, true);
 
   results.addEventListener('click', (e) => {
     const target = e.target as HTMLElement;

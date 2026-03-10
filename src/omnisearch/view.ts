@@ -146,14 +146,14 @@ export function createOmnisearchOverlay(
         </svg>
         <input class="eda-omnisearch-input" type="text" placeholder="Search EDA... (type . for EQL)" autocomplete="off" spellcheck="false" />
         <kbd class="eda-omnisearch-kbd">esc</kbd>
+        <div class="eda-omnisearch-completions" data-open="false"></div>
       </div>
-      <div class="eda-omnisearch-completions" data-open="false"></div>
       <div class="eda-omnisearch-results"></div>
       <div class="eda-omnisearch-footer">
         <span class="eda-omnisearch-footer-hint"><kbd class="eda-omnisearch-footer-key">&uarr;&darr;</kbd> navigate</span>
         <span class="eda-omnisearch-footer-hint"><kbd class="eda-omnisearch-footer-key">&crarr;</kbd> open</span>
         <span class="eda-omnisearch-footer-hint"><kbd class="eda-omnisearch-footer-key">.</kbd> EQL</span>
-        <span class="eda-omnisearch-footer-hint"><kbd class="eda-omnisearch-footer-key">tab</kbd> complete</span>
+        <span class="eda-omnisearch-footer-hint"><kbd class="eda-omnisearch-footer-key">tab</kbd> / <kbd class="eda-omnisearch-footer-key">&crarr;</kbd> complete</span>
         <span class="eda-omnisearch-footer-count"></span>
       </div>
     </div>
@@ -219,7 +219,7 @@ export function createOmnisearchOverlay(
       background: var(--eda-omnisearch-backdrop-bg);
     }
     .eda-omnisearch-panel {
-      position: relative; width: 560px; max-width: 90vw; max-height: 60vh;
+      position: relative; width: 560px; max-width: 90vw; min-height: 60vh; max-height: 60vh;
       background: var(--eda-omnisearch-panel-bg);
       border: 1px solid var(--eda-omnisearch-border);
       border-radius: 12px;
@@ -231,6 +231,7 @@ export function createOmnisearchOverlay(
       color: var(--eda-omnisearch-text-primary);
     }
     .eda-omnisearch-input-row {
+      position: relative;
       display: flex; align-items: center; gap: 8px; padding: 12px 16px;
       border-bottom: 1px solid var(--eda-omnisearch-border);
     }
@@ -255,17 +256,22 @@ export function createOmnisearchOverlay(
     }
     .eda-omnisearch-completions {
       display: none;
-      margin: -4px 16px 8px 42px;
-      border: 1px solid var(--eda-omnisearch-completion-border);
-      border-radius: 8px;
+      position: absolute;
+      left: 42px;
+      right: 16px;
+      top: calc(100% - 4px);
+      z-index: 10;
       background: var(--eda-omnisearch-completion-bg);
       box-shadow: 0 10px 28px rgba(0,0,0,0.45);
       overflow-y: auto;
-      max-height: 200px;
+      max-height: calc(60vh - 90px);
+      border-radius: 8px;
     }
     .eda-omnisearch-completions[data-open="true"] { display: block; }
     .eda-omnisearch-completion-item {
-      display: block;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
       width: 100%;
       padding: 7px 10px;
       border: none;
@@ -276,6 +282,22 @@ export function createOmnisearchOverlay(
       font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace;
       font-size: 12px;
       line-height: 1.4;
+    }
+    .eda-omnisearch-completion-item:first-child { border-radius: 8px 8px 0 0; }
+    .eda-omnisearch-completion-item:last-child { border-radius: 0 0 8px 8px; }
+    .eda-omnisearch-completion-item:only-child { border-radius: 8px; }
+    .eda-omnisearch-completion-label { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    .eda-omnisearch-completion-prefix { color: var(--eda-omnisearch-text-muted); }
+    .eda-omnisearch-completion-hint {
+      flex-shrink: 0;
+      margin-left: 8px;
+      font-size: 11px;
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+      color: var(--eda-omnisearch-text-muted);
+      border: 1px solid var(--eda-omnisearch-kbd-border);
+      border-radius: 4px;
+      padding: 1px 6px;
+      line-height: 1.2;
     }
     .eda-omnisearch-completion-item:hover,
     .eda-omnisearch-completion-item[data-selected="true"] { background: var(--eda-omnisearch-accent-strong); }
@@ -481,9 +503,15 @@ export function renderEqlAutocompleteView(
   container.dataset.open = 'true';
   let html = '';
   autocompleteItems.forEach((item, index) => {
+    const prefix = item.suffix && item.value.endsWith(item.suffix)
+      ? item.value.slice(0, -item.suffix.length)
+      : '';
+    const suffixPart = prefix ? item.suffix : item.value;
+    const isSelected = index === clampedIndex;
     html += `
-      <button class="eda-omnisearch-completion-item" data-selected="${index === clampedIndex}" data-eql-autocomplete-index="${index}">
-        ${escapeHtml(item.value)}
+      <button class="eda-omnisearch-completion-item" data-selected="${isSelected}" data-eql-autocomplete-index="${index}">
+        <span class="eda-omnisearch-completion-label">${prefix ? `<span class="eda-omnisearch-completion-prefix">${escapeHtml(prefix)}</span>` : ''}${escapeHtml(suffixPart)}</span>
+        ${isSelected ? '<span class="eda-omnisearch-completion-hint"><svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="currentColor" style="vertical-align:middle;margin-right:2px"><path d="M19 7v4H5.83l3.58-3.59L8 6l-6 6 6 6 1.41-1.41L5.83 13H21V7z"/></svg>Enter</span>' : ''}
       </button>`;
   });
   container.innerHTML = html;
@@ -499,9 +527,14 @@ export function renderEqlResultsView(
   countEl?: HTMLElement,
 ): void {
   if (countEl) {
-    const resultText = `${eqlItems.length} result${eqlItems.length !== 1 ? 's' : ''}`;
-    const autocompleteText = `${autocompleteCount} suggestion${autocompleteCount !== 1 ? 's' : ''}`;
-    countEl.textContent = `${resultText} | ${autocompleteText}`;
+    const displayed = Math.min(eqlItems.length, 40);
+    if (eqlItems.length > displayed) {
+      countEl.textContent = `Showing ${displayed} of ${eqlItems.length} EQL results`;
+    } else if (eqlItems.length > 0) {
+      countEl.textContent = `${eqlItems.length} EQL result${eqlItems.length !== 1 ? 's' : ''}`;
+    } else {
+      countEl.textContent = '';
+    }
   }
 
   if (query.length <= 1) {
@@ -552,10 +585,5 @@ export function renderEqlResultsView(
   });
 
   html += '</tbody></table></div>';
-
-  if (eqlItems.length > displayedItems.length) {
-    html += `<div class="eda-omnisearch-eql-note">Showing ${displayedItems.length} of ${eqlItems.length} EQL results</div>`;
-  }
-
   container.innerHTML = html;
 }
