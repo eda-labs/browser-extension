@@ -20,6 +20,8 @@ if (!targets.length) {
 const bgOpts = {
   entryPoints: ['src/background.ts', 'src/content.ts', 'src/omnisearch-page.ts'],
   bundle: true, format: 'iife', target: 'es2020',
+  jsx: 'automatic',
+  define: { 'process.env.NODE_ENV': '"production"' },
 };
 
 const uiOpts = {

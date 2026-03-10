@@ -59,11 +59,18 @@ export function scoreMatch(item: NavItem, query: string): number {
     return 40;
   }
 
+  // Fuzzy subsequence: characters must appear in order with limited gaps
   let queryIndex = 0;
+  let lastMatchIndex = -1;
+  let maxGap = 0;
   for (let labelIndex = 0; labelIndex < label.length && queryIndex < query.length; labelIndex += 1) {
-    if (label[labelIndex] === query[queryIndex]) queryIndex += 1;
+    if (label[labelIndex] === query[queryIndex]) {
+      if (lastMatchIndex >= 0) maxGap = Math.max(maxGap, labelIndex - lastMatchIndex - 1);
+      lastMatchIndex = labelIndex;
+      queryIndex += 1;
+    }
   }
-  if (queryIndex === query.length) return 20;
+  if (queryIndex === query.length && maxGap <= 3) return 20;
 
   return -1;
 }
