@@ -141,6 +141,7 @@ export function createSpotlightOverlay(spotlightId: string): HTMLDivElement {
         <input class="eda-spotlight-input" type="text" placeholder="Search EDA... (type . for EQL)" autocomplete="off" spellcheck="false" />
         <kbd class="eda-spotlight-kbd">esc</kbd>
       </div>
+      <div class="eda-spotlight-completions" data-open="false"></div>
       <div class="eda-spotlight-results"></div>
       <div class="eda-spotlight-footer">
         <span class="eda-spotlight-footer-hint"><kbd class="eda-spotlight-footer-key">&uarr;&darr;</kbd> navigate</span>
@@ -184,6 +185,37 @@ export function createSpotlightOverlay(spotlightId: string): HTMLDivElement {
     .eda-spotlight-kbd {
       font-size: 10px; color: #c9ced6; border: 1px solid #4a536180;
       border-radius: 4px; padding: 2px 6px; white-space: nowrap; font-family: inherit;
+    }
+    .eda-spotlight-completions {
+      display: none;
+      margin: -4px 16px 8px 42px;
+      border: 1px solid #4a5361;
+      border-radius: 8px;
+      background: #111824;
+      box-shadow: 0 10px 28px rgba(0,0,0,0.45);
+      overflow-y: auto;
+      max-height: 200px;
+    }
+    .eda-spotlight-completions[data-open="true"] { display: block; }
+    .eda-spotlight-completion-item {
+      display: block;
+      width: 100%;
+      padding: 7px 10px;
+      border: none;
+      background: none;
+      color: #dde5f2;
+      text-align: left;
+      cursor: pointer;
+      font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace;
+      font-size: 12px;
+      line-height: 1.4;
+    }
+    .eda-spotlight-completion-item:hover,
+    .eda-spotlight-completion-item[data-selected="true"] { background: #6098ff33; }
+    .eda-spotlight-completions-empty {
+      padding: 8px 10px;
+      font-size: 11px;
+      color: #c9ced680;
     }
     .eda-spotlight-results { overflow-y: auto; flex: 1; max-height: calc(60vh - 90px); }
     .eda-spotlight-section {
@@ -318,70 +350,97 @@ export function renderNavResults(
 }
 
 interface EqlRenderState {
-  eqlLoading: boolean;
-  eqlError: string;
   eqlAutocompleteLoading: boolean;
   eqlAutocompleteError: string;
+}
+
+interface EqlResultsRenderState {
+  eqlLoading: boolean;
+  eqlError: string;
+}
+
+export function renderEqlAutocompleteView(
+  container: HTMLElement,
+  autocompleteItems: EqlAutocompleteItem[],
+  query: string,
+  selectedIndex: number,
+  state: EqlRenderState,
+): number {
+  if (query.length <= 1) {
+    container.dataset.open = 'false';
+    container.innerHTML = '';
+    return 0;
+  }
+
+  const clampedIndex = Math.max(0, Math.min(selectedIndex, autocompleteItems.length - 1));
+
+  if (state.eqlAutocompleteLoading && !autocompleteItems.length) {
+    container.dataset.open = 'true';
+    container.innerHTML = '<div class="eda-spotlight-completions-empty">Loading suggestions...</div>';
+    return 0;
+  }
+
+  if (state.eqlAutocompleteError) {
+    container.dataset.open = 'true';
+    container.innerHTML = `<div class="eda-spotlight-completions-empty">${escapeHtml(state.eqlAutocompleteError)}</div>`;
+    return 0;
+  }
+
+  if (!autocompleteItems.length) {
+    container.dataset.open = 'false';
+    container.innerHTML = '';
+    return 0;
+  }
+
+  container.dataset.open = 'true';
+  let html = '';
+  autocompleteItems.forEach((item, index) => {
+    html += `
+      <button class="eda-spotlight-completion-item" data-selected="${index === clampedIndex}" data-eql-autocomplete-index="${index}">
+        ${escapeHtml(item.value)}
+      </button>`;
+  });
+  container.innerHTML = html;
+  return clampedIndex;
 }
 
 export function renderEqlResultsView(
   container: HTMLElement,
   eqlItems: EqlResult[],
-  autocompleteItems: EqlAutocompleteItem[],
   query: string,
-  selectedIndex: number,
-  state: EqlRenderState,
+  state: EqlResultsRenderState,
+  autocompleteCount: number,
   countEl?: HTMLElement,
-): number {
-  const clampedIndex = Math.max(0, Math.min(selectedIndex, autocompleteItems.length - 1));
-
+): void {
   if (countEl) {
     const resultText = `${eqlItems.length} result${eqlItems.length !== 1 ? 's' : ''}`;
-    const autocompleteText = `${autocompleteItems.length} suggestion${autocompleteItems.length !== 1 ? 's' : ''}`;
+    const autocompleteText = `${autocompleteCount} suggestion${autocompleteCount !== 1 ? 's' : ''}`;
     countEl.textContent = `${resultText} | ${autocompleteText}`;
   }
 
   if (query.length <= 1) {
     container.innerHTML = '<div class="eda-spotlight-empty">Start typing an EQL query after the dot</div>';
-    return clampedIndex;
+    return;
   }
 
-  let html = '<div class="eda-spotlight-section">Autocomplete</div>';
-
-  if (state.eqlAutocompleteLoading && !autocompleteItems.length) {
-    html += '<div class="eda-spotlight-empty">Loading autocomplete suggestions...</div>';
-  } else if (state.eqlAutocompleteError) {
-    html += `<div class="eda-spotlight-empty">${escapeHtml(state.eqlAutocompleteError)}</div>`;
-  } else if (!autocompleteItems.length) {
-    html += '<div class="eda-spotlight-empty">No autocomplete suggestions</div>';
-  } else {
-    autocompleteItems.forEach((item, index) => {
-      html += `
-        <button class="eda-spotlight-item eda-spotlight-item--autocomplete" data-index="${index}" data-selected="${index === clampedIndex}" data-eql-autocomplete-index="${index}">
-          <span class="eda-spotlight-item-label">${escapeHtml(item.value)}</span>
-          <span class="eda-spotlight-item-path">${escapeHtml(item.suffix)}</span>
-        </button>`;
-    });
-  }
-
-  html += '<div class="eda-spotlight-section">EQL Results</div>';
+  let html = '<div class="eda-spotlight-section">EQL Results</div>';
 
   if (state.eqlLoading && !eqlItems.length) {
     html += '<div class="eda-spotlight-empty">Running EQL query...</div>';
     container.innerHTML = html;
-    return clampedIndex;
+    return;
   }
 
   if (state.eqlError) {
     html += `<div class="eda-spotlight-empty">${escapeHtml(state.eqlError)}</div>`;
     container.innerHTML = html;
-    return clampedIndex;
+    return;
   }
 
   if (!eqlItems.length) {
     html += '<div class="eda-spotlight-empty">No EQL results</div>';
     container.innerHTML = html;
-    return clampedIndex;
+    return;
   }
 
   const displayedItems = eqlItems.slice(0, 40);
@@ -413,5 +472,4 @@ export function renderEqlResultsView(
   }
 
   container.innerHTML = html;
-  return clampedIndex;
 }

@@ -13,7 +13,7 @@ import { humanizeLabel, processAppsPayload } from './spotlight/catalog';
 import { navigate, triggerWorkflowRun } from './spotlight/navigation';
 import { dedupeAndSortItems, scoreMatch } from './spotlight/search';
 import type { EqlAutocompleteItem, EqlResult, NavItem } from './spotlight/types';
-import { createSpotlightOverlay, renderEqlResultsView, renderNavResults } from './spotlight/view';
+import { createSpotlightOverlay, renderEqlAutocompleteView, renderEqlResultsView, renderNavResults } from './spotlight/view';
 
 const SPOTLIGHT_ID = 'eda-ext-spotlight';
 const PAGE_BRIDGE_ID = 'eda-ext-spotlight-page-bridge';
@@ -227,24 +227,32 @@ function renderResults(
 }
 
 function renderEqlResults(
+  autocompleteContainer: HTMLElement,
   container: HTMLElement,
   eqlItems: EqlResult[],
   autocompleteItems: EqlAutocompleteItem[],
   countEl?: HTMLElement,
   query = '',
 ) {
-  selectedIndex = renderEqlResultsView(
-    container,
-    eqlItems,
+  selectedIndex = renderEqlAutocompleteView(
+    autocompleteContainer,
     autocompleteItems,
     query,
     selectedIndex,
     {
-      eqlLoading,
-      eqlError,
       eqlAutocompleteLoading,
       eqlAutocompleteError,
     },
+  );
+  renderEqlResultsView(
+    container,
+    eqlItems,
+    query,
+    {
+      eqlLoading,
+      eqlError,
+    },
+    autocompleteItems.length,
     countEl,
   );
 }
@@ -311,6 +319,7 @@ function openSpotlight() {
   document.body.appendChild(overlay);
 
   const input = requireElement(overlay.querySelector<HTMLInputElement>('.eda-spotlight-input'), '.eda-spotlight-input');
+  const autocomplete = requireElement(overlay.querySelector<HTMLElement>('.eda-spotlight-completions'), '.eda-spotlight-completions');
   const results = requireElement(overlay.querySelector<HTMLElement>('.eda-spotlight-results'), '.eda-spotlight-results');
   const backdrop = requireElement(overlay.querySelector<HTMLElement>('.eda-spotlight-backdrop'), '.eda-spotlight-backdrop');
   const countEl = requireElement(overlay.querySelector<HTMLElement>('.eda-spotlight-footer-count'), '.eda-spotlight-footer-count');
@@ -353,7 +362,7 @@ function openSpotlight() {
   input.focus();
 
   function renderCurrentEql() {
-    renderEqlResults(results, eqlResults, eqlAutocompleteItems, countEl, eqlCurrentQuery);
+    renderEqlResults(autocomplete, results, eqlResults, eqlAutocompleteItems, countEl, eqlCurrentQuery);
   }
 
   eqlRenderCallback = renderCurrentEql;
@@ -380,7 +389,7 @@ function openSpotlight() {
         eqlAutocompleteLoading = false;
         eqlAutocompleteError = '';
         selectedIndex = 0;
-        renderEqlResults(results, [], [], countEl, query);
+        renderEqlResults(autocomplete, results, [], [], countEl, query);
         return;
       }
 
@@ -402,6 +411,8 @@ function openSpotlight() {
       eqlAutocompleteItems = [];
       eqlAutocompleteLoading = false;
       eqlAutocompleteError = '';
+      autocomplete.dataset.open = 'false';
+      autocomplete.innerHTML = '';
     }
 
     renderCurrentNav(raw);
@@ -417,6 +428,8 @@ function openSpotlight() {
     eqlAutocompleteItems = [];
     eqlAutocompleteLoading = false;
     eqlAutocompleteError = '';
+    autocomplete.dataset.open = 'false';
+    autocomplete.innerHTML = '';
     overlay.remove();
   }
 
@@ -483,42 +496,54 @@ function openSpotlight() {
       if (maxIndex < 0) return;
       selectedIndex = Math.min(selectedIndex + 1, maxIndex);
       if (eqlMode) {
-        renderEqlResults(results, eqlResults, eqlAutocompleteItems, countEl, eqlCurrentQuery);
+        renderEqlResults(autocomplete, results, eqlResults, eqlAutocompleteItems, countEl, eqlCurrentQuery);
       } else {
         renderResults(results, filteredItems, input.value.toLowerCase().trim(), countEl);
       }
-      results.querySelector('[data-selected="true"]')?.scrollIntoView({ block: 'nearest' });
+      if (eqlMode) {
+        autocomplete.querySelector('[data-selected="true"]')?.scrollIntoView({ block: 'nearest' });
+      } else {
+        results.querySelector('[data-selected="true"]')?.scrollIntoView({ block: 'nearest' });
+      }
     } else if (e.key === 'ArrowUp') {
       e.preventDefault();
       if (maxIndex < 0) return;
       selectedIndex = Math.max(selectedIndex - 1, 0);
       if (eqlMode) {
-        renderEqlResults(results, eqlResults, eqlAutocompleteItems, countEl, eqlCurrentQuery);
+        renderEqlResults(autocomplete, results, eqlResults, eqlAutocompleteItems, countEl, eqlCurrentQuery);
       } else {
         renderResults(results, filteredItems, input.value.toLowerCase().trim(), countEl);
       }
-      results.querySelector('[data-selected="true"]')?.scrollIntoView({ block: 'nearest' });
+      if (eqlMode) {
+        autocomplete.querySelector('[data-selected="true"]')?.scrollIntoView({ block: 'nearest' });
+      } else {
+        results.querySelector('[data-selected="true"]')?.scrollIntoView({ block: 'nearest' });
+      }
     } else if (e.key === 'Enter') {
       e.preventDefault();
       selectCurrent();
     }
   });
 
+  autocomplete.addEventListener('click', (e) => {
+    if (!eqlMode) return;
+    const target = e.target as HTMLElement;
+    const btn = target.closest<HTMLElement>('[data-eql-autocomplete-index]');
+    if (!btn) return;
+    const autocompleteIdx = Number.parseInt(btn.dataset.eqlAutocompleteIndex ?? '', 10);
+    if (Number.isNaN(autocompleteIdx)) return;
+    selectedIndex = autocompleteIdx;
+    applyAutocomplete(autocompleteIdx);
+  });
+
   results.addEventListener('click', (e) => {
     const target = e.target as HTMLElement;
-    const btn = target.closest<HTMLElement>('.eda-spotlight-item');
     const eqlRow = target.closest<HTMLElement>('[data-eql-result-index]');
-    if (!btn && !eqlRow) return;
+    const btn = target.closest<HTMLElement>('.eda-spotlight-item');
+    if (!eqlRow && !btn) return;
 
     if (eqlMode) {
-      const autocompleteIdx = Number.parseInt(btn?.dataset.eqlAutocompleteIndex ?? '', 10);
-      if (btn && !Number.isNaN(autocompleteIdx)) {
-        selectedIndex = autocompleteIdx;
-        applyAutocomplete(autocompleteIdx);
-        return;
-      }
-
-      const resultIdx = Number.parseInt((btn?.dataset.eqlResultIndex ?? eqlRow?.dataset.eqlResultIndex) ?? '', 10);
+      const resultIdx = Number.parseInt(eqlRow?.dataset.eqlResultIndex ?? '', 10);
       if (!Number.isNaN(resultIdx)) {
         navigateToEql();
       }
