@@ -27,13 +27,19 @@ import {
   Tooltip,
   Typography,
 } from '@mui/material';
-import { useEffect, useRef, useState, type ChangeEvent } from 'react';
+import { useEffect, useMemo, useRef, useState, type ChangeEvent } from 'react';
 import { createRoot } from 'react-dom/client';
 import { AutoLoginDialog } from './components/AutoLoginDialog';
 import { DeleteDialog } from './components/DeleteDialog';
 import { SecretDialog } from './components/SecretDialog';
 import { TlsErrorDialog } from './components/TlsErrorDialog';
 import { api } from './core/api';
+import {
+  DEFAULT_THEME_MODE,
+  EDA_THEME_MODE_STORAGE_KEY,
+  normalizeStoredThemeMode,
+  type ThemeMode,
+} from './core/theme-mode';
 import type { ConnectionStatus, TargetProfile } from './core/types';
 import {
   createHotkeyFromKeyboardEvent,
@@ -45,7 +51,7 @@ import {
   OMNISEARCH_HOTKEY_STORAGE_KEY,
   type OmnisearchHotkey,
 } from './core/settings';
-import theme from './theme';
+import { createAppTheme } from './theme';
 
 const TARGET_DRAFT_STORAGE_KEY = 'settings-target-draft';
 
@@ -108,6 +114,7 @@ function parseImportedTarget(entry: unknown): TargetProfile | null {
 }
 
 function SettingsApp() {
+  const [themeMode, setThemeMode] = useState<ThemeMode>(DEFAULT_THEME_MODE);
   const [status, setStatus] = useState<ConnectionStatus>('disconnected');
   const [targets, setTargets] = useState<TargetProfile[]>([]);
   const [selectedTargetId, setSelectedTargetId] = useState<string | null>(null);
@@ -136,6 +143,7 @@ function SettingsApp() {
 
   const [loading, setLoading] = useState(true);
   const loaded = useRef(false);
+  const theme = useMemo(() => createAppTheme(themeMode), [themeMode]);
 
   const hotkeyDirty = !sameHotkey(storedHotkey, draftHotkey);
   const selectedIsActive = selectedTargetId != null && selectedTargetId === activeTargetId;
@@ -172,7 +180,13 @@ function SettingsApp() {
       try {
         const [loadedHotkey, stored] = await Promise.all([
           getOmnisearchHotkey(),
-          api.storage.local.get(['targets', 'connectionStatus', 'activeTargetId', 'autoLogin']),
+          api.storage.local.get([
+            'targets',
+            'connectionStatus',
+            'activeTargetId',
+            'autoLogin',
+            EDA_THEME_MODE_STORAGE_KEY,
+          ]),
         ]);
 
         const loadedTargets = (stored.targets as TargetProfile[] | undefined) ?? [];
@@ -185,6 +199,7 @@ function SettingsApp() {
         setStatus(loadedStatus);
         setActiveTargetId(loadedActiveId);
         setAutoLogin(!!stored.autoLogin);
+        setThemeMode(normalizeStoredThemeMode(stored[EDA_THEME_MODE_STORAGE_KEY]));
 
         let appliedDraft = false;
         const draftRaw = localStorage.getItem(TARGET_DRAFT_STORAGE_KEY);
@@ -252,6 +267,10 @@ function SettingsApp() {
 
       if (changes.autoLogin) {
         setAutoLogin(!!changes.autoLogin.newValue);
+      }
+
+      if (changes[EDA_THEME_MODE_STORAGE_KEY]) {
+        setThemeMode(normalizeStoredThemeMode(changes[EDA_THEME_MODE_STORAGE_KEY].newValue));
       }
     };
 

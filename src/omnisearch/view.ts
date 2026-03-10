@@ -1,4 +1,5 @@
 import type { EqlAutocompleteItem, EqlResult, NavItem } from './types';
+import type { ThemeMode } from '../core/theme-mode';
 
 function escapeHtml(value: string): string {
   return value.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
@@ -125,12 +126,16 @@ function pickTableColumns(rows: Array<Map<string, string>>): string[] {
   return columns.slice(0, 8);
 }
 
-export function createOmnisearchOverlay(omnisearchId: string): HTMLDivElement {
+export function createOmnisearchOverlay(
+  omnisearchId: string,
+  mode: ThemeMode = 'dark',
+): HTMLDivElement {
   const existing = document.getElementById(omnisearchId);
   if (existing) existing.remove();
 
   const overlay = document.createElement('div');
   overlay.id = omnisearchId;
+  overlay.dataset.theme = mode;
   overlay.innerHTML = `
     <div class="eda-omnisearch-backdrop"></div>
     <div class="eda-omnisearch-panel">
@@ -156,6 +161,26 @@ export function createOmnisearchOverlay(omnisearchId: string): HTMLDivElement {
   const style = document.createElement('style');
   style.textContent = `
     #${omnisearchId} {
+      --eda-omnisearch-backdrop-bg: rgba(0, 0, 0, 0.5);
+      --eda-omnisearch-panel-bg: #1a222e;
+      --eda-omnisearch-border: #4a536180;
+      --eda-omnisearch-shadow: 0 16px 48px rgba(0, 0, 0, 0.4);
+      --eda-omnisearch-text-primary: #ffffff;
+      --eda-omnisearch-text-secondary: #c9ced6;
+      --eda-omnisearch-text-strong: #dde5f2;
+      --eda-omnisearch-text-muted: #c9ced680;
+      --eda-omnisearch-text-subtle: #c9ced650;
+      --eda-omnisearch-accent-weak: #6098ff22;
+      --eda-omnisearch-accent-strong: #6098ff33;
+      --eda-omnisearch-highlight: #6098ff;
+      --eda-omnisearch-completion-bg: #111824;
+      --eda-omnisearch-completion-border: #4a5361;
+      --eda-omnisearch-table-bg: #111824;
+      --eda-omnisearch-table-head-bg: #1d2633;
+      --eda-omnisearch-table-divider: #4a536140;
+      --eda-omnisearch-kbd-border: #4a536180;
+      --eda-omnisearch-footer-kbd-border: #4a536140;
+      color-scheme: dark;
       position: fixed;
       inset: 0;
       z-index: 2147483647;
@@ -164,34 +189,73 @@ export function createOmnisearchOverlay(omnisearchId: string): HTMLDivElement {
       align-items: flex-start;
       padding: 14vh 20px 12vh 20px;
     }
-    .eda-omnisearch-backdrop { position: fixed; inset: 0; background: rgba(0,0,0,0.5); }
+    #${omnisearchId}[data-theme="light"] {
+      --eda-omnisearch-backdrop-bg: rgba(15, 23, 42, 0.28);
+      --eda-omnisearch-panel-bg: #ffffff;
+      --eda-omnisearch-border: #d6dce8;
+      --eda-omnisearch-shadow: 0 16px 48px rgba(15, 23, 42, 0.18);
+      --eda-omnisearch-text-primary: #152033;
+      --eda-omnisearch-text-secondary: #42526a;
+      --eda-omnisearch-text-strong: #1f2f45;
+      --eda-omnisearch-text-muted: #42526a99;
+      --eda-omnisearch-text-subtle: #42526a80;
+      --eda-omnisearch-accent-weak: #2f72ff14;
+      --eda-omnisearch-accent-strong: #2f72ff24;
+      --eda-omnisearch-highlight: #2f72ff;
+      --eda-omnisearch-completion-bg: #ffffff;
+      --eda-omnisearch-completion-border: #d6dce8;
+      --eda-omnisearch-table-bg: #f7f9fc;
+      --eda-omnisearch-table-head-bg: #eef2f8;
+      --eda-omnisearch-table-divider: #d6dce8;
+      --eda-omnisearch-kbd-border: #d6dce8;
+      --eda-omnisearch-footer-kbd-border: #d6dce8;
+      color-scheme: light;
+    }
+    .eda-omnisearch-backdrop {
+      position: fixed;
+      inset: 0;
+      background: var(--eda-omnisearch-backdrop-bg);
+    }
     .eda-omnisearch-panel {
       position: relative; width: 560px; max-width: 90vw; max-height: 60vh;
-      background: #1a222e; border: 1px solid #4a536180; border-radius: 12px;
-      box-shadow: 0 16px 48px rgba(0,0,0,0.4); display: flex; flex-direction: column;
+      background: var(--eda-omnisearch-panel-bg);
+      border: 1px solid var(--eda-omnisearch-border);
+      border-radius: 12px;
+      box-shadow: var(--eda-omnisearch-shadow);
+      display: flex;
+      flex-direction: column;
       overflow: hidden; font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
-      color: #fff;
+      color: var(--eda-omnisearch-text-primary);
     }
     .eda-omnisearch-input-row {
       display: flex; align-items: center; gap: 8px; padding: 12px 16px;
-      border-bottom: 1px solid #4a536180;
+      border-bottom: 1px solid var(--eda-omnisearch-border);
     }
-    .eda-omnisearch-icon { width: 18px; height: 18px; color: #c9ced6; flex-shrink: 0; }
+    .eda-omnisearch-icon {
+      width: 18px;
+      height: 18px;
+      color: var(--eda-omnisearch-text-secondary);
+      flex-shrink: 0;
+    }
     .eda-omnisearch-input {
       flex: 1; background: none; border: none; outline: none;
-      font-size: 15px; color: #fff; font-family: inherit;
+      font-size: 15px;
+      color: var(--eda-omnisearch-text-primary);
+      font-family: inherit;
     }
-    .eda-omnisearch-input::placeholder { color: #c9ced680; }
+    .eda-omnisearch-input::placeholder { color: var(--eda-omnisearch-text-muted); }
     .eda-omnisearch-kbd {
-      font-size: 10px; color: #c9ced6; border: 1px solid #4a536180;
+      font-size: 10px;
+      color: var(--eda-omnisearch-text-secondary);
+      border: 1px solid var(--eda-omnisearch-kbd-border);
       border-radius: 4px; padding: 2px 6px; white-space: nowrap; font-family: inherit;
     }
     .eda-omnisearch-completions {
       display: none;
       margin: -4px 16px 8px 42px;
-      border: 1px solid #4a5361;
+      border: 1px solid var(--eda-omnisearch-completion-border);
       border-radius: 8px;
-      background: #111824;
+      background: var(--eda-omnisearch-completion-bg);
       box-shadow: 0 10px 28px rgba(0,0,0,0.45);
       overflow-y: auto;
       max-height: 200px;
@@ -203,7 +267,7 @@ export function createOmnisearchOverlay(omnisearchId: string): HTMLDivElement {
       padding: 7px 10px;
       border: none;
       background: none;
-      color: #dde5f2;
+      color: var(--eda-omnisearch-text-strong);
       text-align: left;
       cursor: pointer;
       font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace;
@@ -211,29 +275,36 @@ export function createOmnisearchOverlay(omnisearchId: string): HTMLDivElement {
       line-height: 1.4;
     }
     .eda-omnisearch-completion-item:hover,
-    .eda-omnisearch-completion-item[data-selected="true"] { background: #6098ff33; }
+    .eda-omnisearch-completion-item[data-selected="true"] { background: var(--eda-omnisearch-accent-strong); }
     .eda-omnisearch-completions-empty {
       padding: 8px 10px;
       font-size: 11px;
-      color: #c9ced680;
+      color: var(--eda-omnisearch-text-muted);
     }
     .eda-omnisearch-results { overflow-y: auto; flex: 1; max-height: calc(60vh - 90px); }
     .eda-omnisearch-section {
-      padding: 6px 16px 2px; font-size: 11px; color: #c9ced650;
+      padding: 6px 16px 2px;
+      font-size: 11px;
+      color: var(--eda-omnisearch-text-subtle);
       text-transform: uppercase; letter-spacing: 0.5px; font-weight: 500;
     }
     .eda-omnisearch-item {
       display: flex; align-items: center; gap: 10px; padding: 8px 16px;
-      cursor: pointer; text-decoration: none; color: #fff; border: none;
+      cursor: pointer;
+      text-decoration: none;
+      color: var(--eda-omnisearch-text-primary);
+      border: none;
       background: none; width: 100%; text-align: left; font-family: inherit; font-size: 14px;
     }
     .eda-omnisearch-item:hover, .eda-omnisearch-item[data-selected="true"] {
-      background: #6098ff22;
+      background: var(--eda-omnisearch-accent-weak);
     }
-    .eda-omnisearch-item[data-selected="true"] { background: #6098ff33; }
+    .eda-omnisearch-item[data-selected="true"] { background: var(--eda-omnisearch-accent-strong); }
     .eda-omnisearch-item-label { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
     .eda-omnisearch-item-path {
-      font-size: 12px; color: #c9ced650; overflow: hidden;
+      font-size: 12px;
+      color: var(--eda-omnisearch-text-subtle);
+      overflow: hidden;
       text-overflow: ellipsis; white-space: nowrap; max-width: 200px;
     }
     .eda-omnisearch-item--autocomplete .eda-omnisearch-item-label {
@@ -246,11 +317,11 @@ export function createOmnisearchOverlay(omnisearchId: string): HTMLDivElement {
     .eda-omnisearch-item--autocomplete .eda-omnisearch-item-path { display: none; }
     .eda-omnisearch-eql-table-wrap {
       margin: 4px 12px 12px;
-      border: 1px solid #4a536180;
+      border: 1px solid var(--eda-omnisearch-border);
       border-radius: 8px;
       overflow: auto;
       max-height: 280px;
-      background: #111824;
+      background: var(--eda-omnisearch-table-bg);
     }
     .eda-omnisearch-eql-table {
       width: max-content;
@@ -261,7 +332,7 @@ export function createOmnisearchOverlay(omnisearchId: string): HTMLDivElement {
     .eda-omnisearch-eql-table th,
     .eda-omnisearch-eql-table td {
       padding: 6px 8px;
-      border-bottom: 1px solid #4a536140;
+      border-bottom: 1px solid var(--eda-omnisearch-table-divider);
       text-align: left;
       white-space: nowrap;
       max-width: 260px;
@@ -273,39 +344,48 @@ export function createOmnisearchOverlay(omnisearchId: string): HTMLDivElement {
       position: sticky;
       top: 0;
       z-index: 1;
-      background: #1d2633;
-      color: #c9ced6;
+      background: var(--eda-omnisearch-table-head-bg);
+      color: var(--eda-omnisearch-text-secondary);
       text-transform: uppercase;
       letter-spacing: 0.3px;
       font-size: 10px;
       font-weight: 600;
     }
-    .eda-omnisearch-eql-table td { color: #dde5f2; }
+    .eda-omnisearch-eql-table td { color: var(--eda-omnisearch-text-strong); }
     .eda-omnisearch-eql-row { cursor: pointer; }
-    .eda-omnisearch-eql-row:hover { background: #6098ff22; }
+    .eda-omnisearch-eql-row:hover { background: var(--eda-omnisearch-accent-weak); }
     .eda-omnisearch-eql-cell-resource {
       max-width: 360px;
       font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace;
     }
     .eda-omnisearch-eql-note {
       padding: 6px 12px 10px;
-      color: #c9ced680;
+      color: var(--eda-omnisearch-text-muted);
       font-size: 11px;
     }
     .eda-omnisearch-empty {
-      padding: 24px 16px; text-align: center; color: #c9ced680; font-size: 13px;
+      padding: 24px 16px;
+      text-align: center;
+      color: var(--eda-omnisearch-text-muted);
+      font-size: 13px;
     }
     .eda-omnisearch-footer {
-      display: flex; gap: 16px; padding: 6px 16px; border-top: 1px solid #4a536180;
-      font-size: 11px; color: #c9ced650;
+      display: flex;
+      gap: 16px;
+      padding: 6px 16px;
+      border-top: 1px solid var(--eda-omnisearch-border);
+      font-size: 11px;
+      color: var(--eda-omnisearch-text-subtle);
     }
     .eda-omnisearch-footer-hint { display: flex; align-items: center; gap: 4px; }
     .eda-omnisearch-footer-key {
-      font-size: 10px; color: #c9ced6; border: 1px solid #4a536140;
+      font-size: 10px;
+      color: var(--eda-omnisearch-text-secondary);
+      border: 1px solid var(--eda-omnisearch-footer-kbd-border);
       border-radius: 3px; padding: 0 4px; font-family: inherit; line-height: 1.6;
     }
     .eda-omnisearch-footer-count { margin-left: auto; }
-    .eda-omnisearch-highlight { color: #6098ff; font-weight: 600; }
+    .eda-omnisearch-highlight { color: var(--eda-omnisearch-highlight); font-weight: 600; }
   `;
   overlay.prepend(style);
   return overlay;

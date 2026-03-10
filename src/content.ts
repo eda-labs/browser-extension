@@ -1,12 +1,27 @@
 import { api } from './core/api';
+import {
+  detectThemeModeFromDocument,
+  EDA_THEME_MODE_STORAGE_KEY,
+  type ThemeMode,
+} from './core/theme-mode';
 import { getErrorMessage } from './core/utils';
 import { postCurrentStatus, handlePageMessage, handleStorageChange } from './core/handlers';
 
 const PAGE_TARGET_ORIGIN = window.location.origin === 'null' ? '*' : window.location.origin;
+const THEME_MUTATION_ATTRIBUTES = [
+  'class',
+  'style',
+  'data-theme',
+  'data-color-scheme',
+  'data-mui-color-scheme',
+];
 let omnisearchInitialized = false;
 let omnisearchInterceptorInitialized = false;
 let keepaliveConnected = false;
 let omnisearchModulePromise: Promise<typeof import('./omnisearch')> | null = null;
+let edaThemeObserver: MutationObserver | null = null;
+let themeSyncTimeout: ReturnType<typeof setTimeout> | null = null;
+let lastStoredThemeMode: ThemeMode | null = null;
 
 function getOmnisearchModule(): Promise<typeof import('./omnisearch')> {
   if (!omnisearchModulePromise) {
@@ -27,6 +42,53 @@ function isEdaSite(): boolean {
   const desc = document.querySelector('meta[name="description"]');
   if (desc?.getAttribute('content') === 'EDA') return true;
   return location.pathname.startsWith('/ui/');
+}
+
+async function persistThemeMode(mode: ThemeMode): Promise<void> {
+  if (mode === lastStoredThemeMode) return;
+  lastStoredThemeMode = mode;
+  try {
+    await api.storage.local.set({ [EDA_THEME_MODE_STORAGE_KEY]: mode });
+  } catch {
+    // Theme sync is best effort only.
+  }
+}
+
+function syncCurrentThemeMode(): void {
+  if (!isEdaSite()) return;
+  void persistThemeMode(detectThemeModeFromDocument());
+}
+
+function scheduleThemeSync(): void {
+  if (themeSyncTimeout) return;
+  themeSyncTimeout = setTimeout(() => {
+    themeSyncTimeout = null;
+    syncCurrentThemeMode();
+  }, 80);
+}
+
+function ensureThemeObserver(): void {
+  if (!isEdaSite() || edaThemeObserver) return;
+
+  syncCurrentThemeMode();
+
+  const root = document.documentElement;
+  if (!root) return;
+
+  edaThemeObserver = new MutationObserver(() => {
+    scheduleThemeSync();
+  });
+  edaThemeObserver.observe(root, {
+    subtree: true,
+    attributes: true,
+    attributeFilter: THEME_MUTATION_ATTRIBUTES,
+  });
+
+  document.addEventListener('visibilitychange', () => {
+    if (document.visibilityState === 'visible') {
+      scheduleThemeSync();
+    }
+  });
 }
 
 window.addEventListener('message', (event: MessageEvent) => void handlePageMessage(event));
@@ -151,6 +213,7 @@ async function tryAutoLogin(): Promise<void> {
 function initEdaFeatures(): void {
   void tryAutoLogin();
   if (!isEdaSite()) return;
+  ensureThemeObserver();
   ensureKeepalive();
   if (omnisearchInitialized) return;
   omnisearchInitialized = true;
