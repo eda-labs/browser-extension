@@ -35,7 +35,7 @@ The popup now includes a settings button (gear icon) that opens extension settin
 
 Current settings:
 - Target setup (EDA URL, username/password, client secret, auto-login toggle)
-- Spotlight hotkey (default: `Ctrl/Cmd + K`)
+- Omnisearch hotkey (default: `Ctrl/Cmd + K`)
 
 Popup flow:
 - Select target

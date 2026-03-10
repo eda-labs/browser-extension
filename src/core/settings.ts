@@ -1,8 +1,8 @@
 import { api } from './api';
 
-export const SPOTLIGHT_HOTKEY_STORAGE_KEY = 'spotlightHotkey';
+export const OMNISEARCH_HOTKEY_STORAGE_KEY = 'omnisearchHotkey';
 
-export interface SpotlightHotkey {
+export interface OmnisearchHotkey {
   code: string;
   ctrl: boolean;
   meta: boolean;
@@ -51,7 +51,7 @@ const CODE_LABELS: Record<string, string> = {
   ArrowRight: 'Arrow Right',
 };
 
-export const DEFAULT_SPOTLIGHT_HOTKEY: SpotlightHotkey = {
+export const DEFAULT_OMNISEARCH_HOTKEY: OmnisearchHotkey = {
   code: 'KeyK',
   ctrl: false,
   meta: false,
@@ -70,18 +70,18 @@ function toBoolean(value: unknown): boolean {
   return value === true;
 }
 
-export function hasHotkeyModifier(hotkey: SpotlightHotkey): boolean {
+export function hasHotkeyModifier(hotkey: OmnisearchHotkey): boolean {
   return hotkey.usePrimaryModifier || hotkey.ctrl || hotkey.meta || hotkey.alt || hotkey.shift;
 }
 
-export function normalizeSpotlightHotkey(value: unknown): SpotlightHotkey {
+export function normalizeOmnisearchHotkey(value: unknown): OmnisearchHotkey {
   if (!isRecord(value)) {
-    return DEFAULT_SPOTLIGHT_HOTKEY;
+    return DEFAULT_OMNISEARCH_HOTKEY;
   }
 
   const code = typeof value.code === 'string' && value.code.length > 0
     ? value.code
-    : DEFAULT_SPOTLIGHT_HOTKEY.code;
+    : DEFAULT_OMNISEARCH_HOTKEY.code;
   const ctrl = toBoolean(value.ctrl);
   const meta = toBoolean(value.meta);
   const alt = toBoolean(value.alt);
@@ -99,7 +99,7 @@ export function normalizeSpotlightHotkey(value: unknown): SpotlightHotkey {
     };
   }
 
-  const candidate: SpotlightHotkey = {
+  const candidate: OmnisearchHotkey = {
     code,
     ctrl,
     meta,
@@ -108,7 +108,7 @@ export function normalizeSpotlightHotkey(value: unknown): SpotlightHotkey {
     usePrimaryModifier: false,
   };
 
-  return hasHotkeyModifier(candidate) ? candidate : DEFAULT_SPOTLIGHT_HOTKEY;
+  return hasHotkeyModifier(candidate) ? candidate : DEFAULT_OMNISEARCH_HOTKEY;
 }
 
 export function keyLabelFromCode(code: string): string {
@@ -120,7 +120,7 @@ export function keyLabelFromCode(code: string): string {
   return code.replace(/^Arrow/u, 'Arrow ').replace(/([a-z])([A-Z])/gu, '$1 $2').trim() || code;
 }
 
-export function formatSpotlightHotkey(hotkey: SpotlightHotkey): string {
+export function formatOmnisearchHotkey(hotkey: OmnisearchHotkey): string {
   const parts: string[] = [];
 
   if (hotkey.usePrimaryModifier) {
@@ -136,12 +136,12 @@ export function formatSpotlightHotkey(hotkey: SpotlightHotkey): string {
   return parts.join(' + ');
 }
 
-export function createHotkeyFromKeyboardEvent(event: HotkeyEvent): SpotlightHotkey | null {
+export function createHotkeyFromKeyboardEvent(event: HotkeyEvent): OmnisearchHotkey | null {
   if (!event.code || event.code === 'Unidentified' || MODIFIER_CODES.has(event.code)) {
     return null;
   }
 
-  const candidate: SpotlightHotkey = {
+  const candidate: OmnisearchHotkey = {
     code: event.code,
     ctrl: event.ctrlKey,
     meta: event.metaKey,
@@ -157,7 +157,7 @@ export function createHotkeyFromKeyboardEvent(event: HotkeyEvent): SpotlightHotk
   return candidate;
 }
 
-export function matchesSpotlightHotkey(event: HotkeyEvent, hotkey: SpotlightHotkey): boolean {
+export function matchesOmnisearchHotkey(event: HotkeyEvent, hotkey: OmnisearchHotkey): boolean {
   if (event.code !== hotkey.code) return false;
 
   if (hotkey.usePrimaryModifier) {
@@ -175,13 +175,13 @@ export function matchesSpotlightHotkey(event: HotkeyEvent, hotkey: SpotlightHotk
   );
 }
 
-export async function getSpotlightHotkey(): Promise<SpotlightHotkey> {
-  const stored = await api.storage.local.get([SPOTLIGHT_HOTKEY_STORAGE_KEY]);
-  return normalizeSpotlightHotkey(stored[SPOTLIGHT_HOTKEY_STORAGE_KEY]);
+export async function getOmnisearchHotkey(): Promise<OmnisearchHotkey> {
+  const stored = await api.storage.local.get([OMNISEARCH_HOTKEY_STORAGE_KEY]);
+  return normalizeOmnisearchHotkey(stored[OMNISEARCH_HOTKEY_STORAGE_KEY]);
 }
 
-export async function setSpotlightHotkey(hotkey: SpotlightHotkey): Promise<void> {
+export async function setOmnisearchHotkey(hotkey: OmnisearchHotkey): Promise<void> {
   await api.storage.local.set({
-    [SPOTLIGHT_HOTKEY_STORAGE_KEY]: normalizeSpotlightHotkey(hotkey),
+    [OMNISEARCH_HOTKEY_STORAGE_KEY]: normalizeOmnisearchHotkey(hotkey),
   });
 }

@@ -3,24 +3,24 @@ import { getErrorMessage } from './core/utils';
 import { postCurrentStatus, handlePageMessage, handleStorageChange } from './core/handlers';
 
 const PAGE_TARGET_ORIGIN = window.location.origin === 'null' ? '*' : window.location.origin;
-let spotlightInitialized = false;
-let spotlightInterceptorInitialized = false;
+let omnisearchInitialized = false;
+let omnisearchInterceptorInitialized = false;
 let keepaliveConnected = false;
-let spotlightModulePromise: Promise<typeof import('./spotlight')> | null = null;
+let omnisearchModulePromise: Promise<typeof import('./omnisearch')> | null = null;
 
-function getSpotlightModule(): Promise<typeof import('./spotlight')> {
-  if (!spotlightModulePromise) {
-    spotlightModulePromise = import('./spotlight');
+function getOmnisearchModule(): Promise<typeof import('./omnisearch')> {
+  if (!omnisearchModulePromise) {
+    omnisearchModulePromise = import('./omnisearch');
   }
-  return spotlightModulePromise;
+  return omnisearchModulePromise;
 }
 
-async function ensureSpotlightInterceptor(): Promise<void> {
-  if (spotlightInterceptorInitialized) return;
-  const { injectSpotlightInterceptor } = await getSpotlightModule();
-  if (spotlightInterceptorInitialized) return;
-  injectSpotlightInterceptor();
-  spotlightInterceptorInitialized = true;
+async function ensureOmnisearchInterceptor(): Promise<void> {
+  if (omnisearchInterceptorInitialized) return;
+  const { injectOmnisearchInterceptor } = await getOmnisearchModule();
+  if (omnisearchInterceptorInitialized) return;
+  injectOmnisearchInterceptor();
+  omnisearchInterceptorInitialized = true;
 }
 
 function isEdaSite(): boolean {
@@ -152,15 +152,15 @@ function initEdaFeatures(): void {
   void tryAutoLogin();
   if (!isEdaSite()) return;
   ensureKeepalive();
-  if (spotlightInitialized) return;
-  spotlightInitialized = true;
+  if (omnisearchInitialized) return;
+  omnisearchInitialized = true;
   void (async () => {
     try {
-      await ensureSpotlightInterceptor();
-      const { initSpotlight } = await getSpotlightModule();
-      initSpotlight();
+      await ensureOmnisearchInterceptor();
+      const { initOmnisearch } = await getOmnisearchModule();
+      initOmnisearch();
     } catch {
-      spotlightInitialized = false;
+      omnisearchInitialized = false;
     }
   })();
 }
@@ -168,7 +168,7 @@ function initEdaFeatures(): void {
 if (location.pathname.startsWith('/ui/')) {
   void (async () => {
     try {
-      await ensureSpotlightInterceptor();
+      await ensureOmnisearchInterceptor();
     } catch {
       // Ignore pre-initialization failures; regular init retries.
     }

@@ -11,7 +11,7 @@ import { tabIdByOrigin, tabOpenedAtByOrigin, doDirectFetch, doTabFetchFallback, 
 import { decodeJwtExp, fetchToken, fetchClientSecret } from './core/auth';
 import { initKeepalive, stopKeepalive } from './core/keepalive';
 
-const SPOTLIGHT_REQUEST_CHANNEL = 'eda-ext-spotlight-request';
+const OMNISEARCH_REQUEST_CHANNEL = 'eda-ext-omnisearch-request';
 
 let state: EdaState = {
   status: 'disconnected',
@@ -71,7 +71,7 @@ function isInternalEdaUiRequest(
   if (!senderOrigin || !requestOrigin || senderOrigin !== requestOrigin) {
     return false;
   }
-  if (channelRaw !== SPOTLIGHT_REQUEST_CHANNEL) {
+  if (channelRaw !== OMNISEARCH_REQUEST_CHANNEL) {
     return false;
   }
   try {

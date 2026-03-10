@@ -37,19 +37,19 @@ import { api } from './core/api';
 import type { ConnectionStatus, TargetProfile } from './core/types';
 import {
   createHotkeyFromKeyboardEvent,
-  DEFAULT_SPOTLIGHT_HOTKEY,
-  formatSpotlightHotkey,
-  getSpotlightHotkey,
-  normalizeSpotlightHotkey,
-  setSpotlightHotkey,
-  SPOTLIGHT_HOTKEY_STORAGE_KEY,
-  type SpotlightHotkey,
+  DEFAULT_OMNISEARCH_HOTKEY,
+  formatOmnisearchHotkey,
+  getOmnisearchHotkey,
+  normalizeOmnisearchHotkey,
+  setOmnisearchHotkey,
+  OMNISEARCH_HOTKEY_STORAGE_KEY,
+  type OmnisearchHotkey,
 } from './core/settings';
 import theme from './theme';
 
 const TARGET_DRAFT_STORAGE_KEY = 'settings-target-draft';
 
-function sameHotkey(left: SpotlightHotkey, right: SpotlightHotkey): boolean {
+function sameHotkey(left: OmnisearchHotkey, right: OmnisearchHotkey): boolean {
   return (
     left.code === right.code
     && left.ctrl === right.ctrl
@@ -79,8 +79,8 @@ function SettingsApp() {
   const [autoLoginDialogOpen, setAutoLoginDialogOpen] = useState(false);
   const [tlsDialogOpen, setTlsDialogOpen] = useState(false);
 
-  const [storedHotkey, setStoredHotkey] = useState<SpotlightHotkey>(DEFAULT_SPOTLIGHT_HOTKEY);
-  const [draftHotkey, setDraftHotkey] = useState<SpotlightHotkey>(DEFAULT_SPOTLIGHT_HOTKEY);
+  const [storedHotkey, setStoredHotkey] = useState<OmnisearchHotkey>(DEFAULT_OMNISEARCH_HOTKEY);
+  const [draftHotkey, setDraftHotkey] = useState<OmnisearchHotkey>(DEFAULT_OMNISEARCH_HOTKEY);
   const [hotkeySaving, setHotkeySaving] = useState(false);
   const [captureMode, setCaptureMode] = useState(false);
   const [hotkeyMessage, setHotkeyMessage] = useState('');
@@ -123,7 +123,7 @@ function SettingsApp() {
     void (async () => {
       try {
         const [loadedHotkey, stored] = await Promise.all([
-          getSpotlightHotkey(),
+          getOmnisearchHotkey(),
           api.storage.local.get(['targets', 'connectionStatus', 'activeTargetId', 'autoLogin']),
         ]);
 
@@ -183,9 +183,9 @@ function SettingsApp() {
     ) => {
       if (areaName !== 'local') return;
 
-      const changedHotkey = changes[SPOTLIGHT_HOTKEY_STORAGE_KEY];
+      const changedHotkey = changes[OMNISEARCH_HOTKEY_STORAGE_KEY];
       if (changedHotkey) {
-        const nextHotkey = normalizeSpotlightHotkey(changedHotkey.newValue);
+        const nextHotkey = normalizeOmnisearchHotkey(changedHotkey.newValue);
         setStoredHotkey(nextHotkey);
         setDraftHotkey(nextHotkey);
       }
@@ -259,7 +259,7 @@ function SettingsApp() {
       setDraftHotkey(captured);
       setCaptureMode(false);
       setHotkeyError('');
-      setHotkeyMessage(`Captured ${formatSpotlightHotkey(captured)}. Click Save to apply.`);
+      setHotkeyMessage(`Captured ${formatOmnisearchHotkey(captured)}. Click Save to apply.`);
     };
 
     window.addEventListener('keydown', onKeyDown, true);
@@ -352,11 +352,11 @@ function SettingsApp() {
     setHotkeyError('');
     setHotkeyMessage('');
     try {
-      const normalized = normalizeSpotlightHotkey(draftHotkey);
-      await setSpotlightHotkey(normalized);
+      const normalized = normalizeOmnisearchHotkey(draftHotkey);
+      await setOmnisearchHotkey(normalized);
       setStoredHotkey(normalized);
       setDraftHotkey(normalized);
-      setHotkeyMessage(`Saved ${formatSpotlightHotkey(normalized)}.`);
+      setHotkeyMessage(`Saved ${formatOmnisearchHotkey(normalized)}.`);
     } catch (err) {
       setHotkeyError(err instanceof Error ? err.message : 'Could not save settings');
     } finally {
@@ -366,7 +366,7 @@ function SettingsApp() {
 
   function resetDraftToDefault(): void {
     setCaptureMode(false);
-    setDraftHotkey(DEFAULT_SPOTLIGHT_HOTKEY);
+    setDraftHotkey(DEFAULT_OMNISEARCH_HOTKEY);
     setHotkeyError('');
     setHotkeyMessage('Reset to default shortcut. Click Save to apply.');
   }
@@ -634,7 +634,7 @@ function SettingsApp() {
                   <Stack direction="row" alignItems="center" spacing={1}>
                     <KeyboardCommandKeyRoundedIcon color="info" fontSize="small" />
                     <Typography variant="subtitle1" sx={{ fontWeight: 700 }}>
-                      Spotlight Shortcut
+                      Omnisearch Shortcut
                     </Typography>
                   </Stack>
 
@@ -653,7 +653,7 @@ function SettingsApp() {
                     }}
                   >
                     <Typography variant="body2" sx={{ fontWeight: 600, letterSpacing: 0.2 }}>
-                      {formatSpotlightHotkey(draftHotkey)}
+                      {formatOmnisearchHotkey(draftHotkey)}
                     </Typography>
                     <Chip
                       size="small"

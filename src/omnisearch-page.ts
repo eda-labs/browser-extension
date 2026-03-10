@@ -7,8 +7,8 @@ import {
   EQL_AUTOCOMPLETE_RESPONSE_MSG,
   EQL_REQUEST_MSG,
   EQL_RESPONSE_MSG,
-  SPOTLIGHT_BRIDGE_CHANNEL,
-} from './spotlight/constants';
+  OMNISEARCH_BRIDGE_CHANNEL,
+} from './omnisearch/constants';
 import {
   buildResourceEqlQueries,
   checkAccess,
@@ -18,13 +18,13 @@ import {
   extractObjectArray,
   parseResponseBody,
   resourcePriority,
-} from './spotlight/page-helpers';
-import type { AppsGroup, ParsedKind } from './spotlight/types';
+} from './omnisearch/page-helpers';
+import type { AppsGroup, ParsedKind } from './omnisearch/types';
 
 const PAGE_TARGET_ORIGIN = window.location.origin === 'null' ? '*' : window.location.origin;
 
-type SpotlightWindow = Window & {
-  __edaExtSpotlightState?: {
+type OmnisearchWindow = Window & {
+  __edaExtOmnisearchState?: {
     token: string;
     cachedItems: ParsedKind[];
     lastFetchTs: number;
@@ -46,20 +46,20 @@ interface EdaResponsePayload {
 }
 
 function post(type: string, payload: Record<string, unknown>): void {
-  window.postMessage({ type, channel: SPOTLIGHT_BRIDGE_CHANNEL, ...payload }, PAGE_TARGET_ORIGIN);
+  window.postMessage({ type, channel: OMNISEARCH_BRIDGE_CHANNEL, ...payload }, PAGE_TARGET_ORIGIN);
 }
 
-function getState(): NonNullable<SpotlightWindow['__edaExtSpotlightState']> {
-  const w = window as SpotlightWindow;
-  if (!w.__edaExtSpotlightState) {
-    w.__edaExtSpotlightState = {
+function getState(): NonNullable<OmnisearchWindow['__edaExtOmnisearchState']> {
+  const w = window as OmnisearchWindow;
+  if (!w.__edaExtOmnisearchState) {
+    w.__edaExtOmnisearchState = {
       token: '',
       cachedItems: [],
       lastFetchTs: 0,
       fetching: false,
     };
   }
-  return w.__edaExtSpotlightState;
+  return w.__edaExtOmnisearchState;
 }
 
 function toHeadersList(headers: HeadersInit | undefined): Array<[string, string]> {
@@ -97,22 +97,22 @@ function captureTokenFromHeaders(headers: HeadersInit | undefined): void {
 function patchXhr(): void {
   const proto = XMLHttpRequest.prototype as unknown as {
     setRequestHeader: (name: string, value: string) => void;
-    __edaExtSpotlightPatched?: boolean;
+    __edaExtOmnisearchPatched?: boolean;
   };
 
-  if (proto.__edaExtSpotlightPatched) return;
+  if (proto.__edaExtOmnisearchPatched) return;
 
   const originalSetRequestHeader = proto.setRequestHeader;
   proto.setRequestHeader = function patchedSetRequestHeader(name: string, value: string): void {
     captureTokenFromHeaders([[name, value]]);
     originalSetRequestHeader.call(this, name, value);
   };
-  proto.__edaExtSpotlightPatched = true;
+  proto.__edaExtOmnisearchPatched = true;
 }
 
 function patchFetch(): void {
-  const w = window as Window & { __edaExtSpotlightFetchPatched?: boolean };
-  if (w.__edaExtSpotlightFetchPatched) return;
+  const w = window as Window & { __edaExtOmnisearchFetchPatched?: boolean };
+  if (w.__edaExtOmnisearchFetchPatched) return;
 
   const originalFetch = window.fetch.bind(window);
   window.fetch = function patchedFetch(input: RequestInfo | URL, init?: RequestInit): Promise<Response> {
@@ -122,7 +122,7 @@ function patchFetch(): void {
     }
     return originalFetch(input, init);
   };
-  w.__edaExtSpotlightFetchPatched = true;
+  w.__edaExtOmnisearchFetchPatched = true;
 }
 
 async function sendEdaRequest(path: string, method = 'GET', body?: string): Promise<EdaResponsePayload> {
@@ -416,7 +416,7 @@ function setupMessageBridge(): void {
     if (!event.data || typeof event.data !== 'object') return;
 
     const data = event.data as Record<string, unknown>;
-    if (data.channel !== SPOTLIGHT_BRIDGE_CHANNEL) return;
+    if (data.channel !== OMNISEARCH_BRIDGE_CHANNEL) return;
     if (data.type === APPS_REQUEST_MSG) {
       void fetchAllResources(Boolean(data.force));
       return;

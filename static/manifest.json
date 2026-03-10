@@ -20,7 +20,7 @@
   ],
   "web_accessible_resources": [
     {
-      "resources": ["spotlight-page.js"],
+      "resources": ["omnisearch-page.js"],
       "matches": ["https://*/*", "https://eda.dev/*", "https://*.eda.dev/*"]
     }
   ],

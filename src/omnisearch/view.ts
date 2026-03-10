@@ -16,7 +16,7 @@ function highlightMatch(text: string, query: string): string {
   const before = text.slice(0, index);
   const match = text.slice(index, index + query.length);
   const after = text.slice(index + query.length);
-  return `${escapeHtml(before)}<span class="eda-spotlight-highlight">${escapeHtml(match)}</span>${escapeHtml(after)}`;
+  return `${escapeHtml(before)}<span class="eda-omnisearch-highlight">${escapeHtml(match)}</span>${escapeHtml(after)}`;
 }
 
 function toFlatCellValue(value: unknown): string {
@@ -125,37 +125,37 @@ function pickTableColumns(rows: Array<Map<string, string>>): string[] {
   return columns.slice(0, 8);
 }
 
-export function createSpotlightOverlay(spotlightId: string): HTMLDivElement {
-  const existing = document.getElementById(spotlightId);
+export function createOmnisearchOverlay(omnisearchId: string): HTMLDivElement {
+  const existing = document.getElementById(omnisearchId);
   if (existing) existing.remove();
 
   const overlay = document.createElement('div');
-  overlay.id = spotlightId;
+  overlay.id = omnisearchId;
   overlay.innerHTML = `
-    <div class="eda-spotlight-backdrop"></div>
-    <div class="eda-spotlight-panel">
-      <div class="eda-spotlight-input-row">
-        <svg class="eda-spotlight-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+    <div class="eda-omnisearch-backdrop"></div>
+    <div class="eda-omnisearch-panel">
+      <div class="eda-omnisearch-input-row">
+        <svg class="eda-omnisearch-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
           <circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/>
         </svg>
-        <input class="eda-spotlight-input" type="text" placeholder="Search EDA... (type . for EQL)" autocomplete="off" spellcheck="false" />
-        <kbd class="eda-spotlight-kbd">esc</kbd>
+        <input class="eda-omnisearch-input" type="text" placeholder="Search EDA... (type . for EQL)" autocomplete="off" spellcheck="false" />
+        <kbd class="eda-omnisearch-kbd">esc</kbd>
       </div>
-      <div class="eda-spotlight-completions" data-open="false"></div>
-      <div class="eda-spotlight-results"></div>
-      <div class="eda-spotlight-footer">
-        <span class="eda-spotlight-footer-hint"><kbd class="eda-spotlight-footer-key">&uarr;&darr;</kbd> navigate</span>
-        <span class="eda-spotlight-footer-hint"><kbd class="eda-spotlight-footer-key">&crarr;</kbd> open</span>
-        <span class="eda-spotlight-footer-hint"><kbd class="eda-spotlight-footer-key">.</kbd> EQL</span>
-        <span class="eda-spotlight-footer-hint"><kbd class="eda-spotlight-footer-key">tab</kbd> complete</span>
-        <span class="eda-spotlight-footer-count"></span>
+      <div class="eda-omnisearch-completions" data-open="false"></div>
+      <div class="eda-omnisearch-results"></div>
+      <div class="eda-omnisearch-footer">
+        <span class="eda-omnisearch-footer-hint"><kbd class="eda-omnisearch-footer-key">&uarr;&darr;</kbd> navigate</span>
+        <span class="eda-omnisearch-footer-hint"><kbd class="eda-omnisearch-footer-key">&crarr;</kbd> open</span>
+        <span class="eda-omnisearch-footer-hint"><kbd class="eda-omnisearch-footer-key">.</kbd> EQL</span>
+        <span class="eda-omnisearch-footer-hint"><kbd class="eda-omnisearch-footer-key">tab</kbd> complete</span>
+        <span class="eda-omnisearch-footer-count"></span>
       </div>
     </div>
   `;
 
   const style = document.createElement('style');
   style.textContent = `
-    #${spotlightId} {
+    #${omnisearchId} {
       position: fixed;
       inset: 0;
       z-index: 2147483647;
@@ -164,29 +164,29 @@ export function createSpotlightOverlay(spotlightId: string): HTMLDivElement {
       align-items: flex-start;
       padding: 14vh 20px 12vh 20px;
     }
-    .eda-spotlight-backdrop { position: fixed; inset: 0; background: rgba(0,0,0,0.5); }
-    .eda-spotlight-panel {
+    .eda-omnisearch-backdrop { position: fixed; inset: 0; background: rgba(0,0,0,0.5); }
+    .eda-omnisearch-panel {
       position: relative; width: 560px; max-width: 90vw; max-height: 60vh;
       background: #1a222e; border: 1px solid #4a536180; border-radius: 12px;
       box-shadow: 0 16px 48px rgba(0,0,0,0.4); display: flex; flex-direction: column;
       overflow: hidden; font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
       color: #fff;
     }
-    .eda-spotlight-input-row {
+    .eda-omnisearch-input-row {
       display: flex; align-items: center; gap: 8px; padding: 12px 16px;
       border-bottom: 1px solid #4a536180;
     }
-    .eda-spotlight-icon { width: 18px; height: 18px; color: #c9ced6; flex-shrink: 0; }
-    .eda-spotlight-input {
+    .eda-omnisearch-icon { width: 18px; height: 18px; color: #c9ced6; flex-shrink: 0; }
+    .eda-omnisearch-input {
       flex: 1; background: none; border: none; outline: none;
       font-size: 15px; color: #fff; font-family: inherit;
     }
-    .eda-spotlight-input::placeholder { color: #c9ced680; }
-    .eda-spotlight-kbd {
+    .eda-omnisearch-input::placeholder { color: #c9ced680; }
+    .eda-omnisearch-kbd {
       font-size: 10px; color: #c9ced6; border: 1px solid #4a536180;
       border-radius: 4px; padding: 2px 6px; white-space: nowrap; font-family: inherit;
     }
-    .eda-spotlight-completions {
+    .eda-omnisearch-completions {
       display: none;
       margin: -4px 16px 8px 42px;
       border: 1px solid #4a5361;
@@ -196,8 +196,8 @@ export function createSpotlightOverlay(spotlightId: string): HTMLDivElement {
       overflow-y: auto;
       max-height: 200px;
     }
-    .eda-spotlight-completions[data-open="true"] { display: block; }
-    .eda-spotlight-completion-item {
+    .eda-omnisearch-completions[data-open="true"] { display: block; }
+    .eda-omnisearch-completion-item {
       display: block;
       width: 100%;
       padding: 7px 10px;
@@ -210,41 +210,41 @@ export function createSpotlightOverlay(spotlightId: string): HTMLDivElement {
       font-size: 12px;
       line-height: 1.4;
     }
-    .eda-spotlight-completion-item:hover,
-    .eda-spotlight-completion-item[data-selected="true"] { background: #6098ff33; }
-    .eda-spotlight-completions-empty {
+    .eda-omnisearch-completion-item:hover,
+    .eda-omnisearch-completion-item[data-selected="true"] { background: #6098ff33; }
+    .eda-omnisearch-completions-empty {
       padding: 8px 10px;
       font-size: 11px;
       color: #c9ced680;
     }
-    .eda-spotlight-results { overflow-y: auto; flex: 1; max-height: calc(60vh - 90px); }
-    .eda-spotlight-section {
+    .eda-omnisearch-results { overflow-y: auto; flex: 1; max-height: calc(60vh - 90px); }
+    .eda-omnisearch-section {
       padding: 6px 16px 2px; font-size: 11px; color: #c9ced650;
       text-transform: uppercase; letter-spacing: 0.5px; font-weight: 500;
     }
-    .eda-spotlight-item {
+    .eda-omnisearch-item {
       display: flex; align-items: center; gap: 10px; padding: 8px 16px;
       cursor: pointer; text-decoration: none; color: #fff; border: none;
       background: none; width: 100%; text-align: left; font-family: inherit; font-size: 14px;
     }
-    .eda-spotlight-item:hover, .eda-spotlight-item[data-selected="true"] {
+    .eda-omnisearch-item:hover, .eda-omnisearch-item[data-selected="true"] {
       background: #6098ff22;
     }
-    .eda-spotlight-item[data-selected="true"] { background: #6098ff33; }
-    .eda-spotlight-item-label { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-    .eda-spotlight-item-path {
+    .eda-omnisearch-item[data-selected="true"] { background: #6098ff33; }
+    .eda-omnisearch-item-label { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    .eda-omnisearch-item-path {
       font-size: 12px; color: #c9ced650; overflow: hidden;
       text-overflow: ellipsis; white-space: nowrap; max-width: 200px;
     }
-    .eda-spotlight-item--autocomplete .eda-spotlight-item-label {
+    .eda-omnisearch-item--autocomplete .eda-omnisearch-item-label {
       overflow: visible;
       text-overflow: clip;
       white-space: normal;
       word-break: break-all;
       font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace;
     }
-    .eda-spotlight-item--autocomplete .eda-spotlight-item-path { display: none; }
-    .eda-spotlight-eql-table-wrap {
+    .eda-omnisearch-item--autocomplete .eda-omnisearch-item-path { display: none; }
+    .eda-omnisearch-eql-table-wrap {
       margin: 4px 12px 12px;
       border: 1px solid #4a536180;
       border-radius: 8px;
@@ -252,14 +252,14 @@ export function createSpotlightOverlay(spotlightId: string): HTMLDivElement {
       max-height: 280px;
       background: #111824;
     }
-    .eda-spotlight-eql-table {
+    .eda-omnisearch-eql-table {
       width: max-content;
       min-width: 100%;
       border-collapse: collapse;
       font-size: 12px;
     }
-    .eda-spotlight-eql-table th,
-    .eda-spotlight-eql-table td {
+    .eda-omnisearch-eql-table th,
+    .eda-omnisearch-eql-table td {
       padding: 6px 8px;
       border-bottom: 1px solid #4a536140;
       text-align: left;
@@ -269,7 +269,7 @@ export function createSpotlightOverlay(spotlightId: string): HTMLDivElement {
       text-overflow: ellipsis;
       vertical-align: top;
     }
-    .eda-spotlight-eql-table th {
+    .eda-omnisearch-eql-table th {
       position: sticky;
       top: 0;
       z-index: 1;
@@ -280,32 +280,32 @@ export function createSpotlightOverlay(spotlightId: string): HTMLDivElement {
       font-size: 10px;
       font-weight: 600;
     }
-    .eda-spotlight-eql-table td { color: #dde5f2; }
-    .eda-spotlight-eql-row { cursor: pointer; }
-    .eda-spotlight-eql-row:hover { background: #6098ff22; }
-    .eda-spotlight-eql-cell-resource {
+    .eda-omnisearch-eql-table td { color: #dde5f2; }
+    .eda-omnisearch-eql-row { cursor: pointer; }
+    .eda-omnisearch-eql-row:hover { background: #6098ff22; }
+    .eda-omnisearch-eql-cell-resource {
       max-width: 360px;
       font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace;
     }
-    .eda-spotlight-eql-note {
+    .eda-omnisearch-eql-note {
       padding: 6px 12px 10px;
       color: #c9ced680;
       font-size: 11px;
     }
-    .eda-spotlight-empty {
+    .eda-omnisearch-empty {
       padding: 24px 16px; text-align: center; color: #c9ced680; font-size: 13px;
     }
-    .eda-spotlight-footer {
+    .eda-omnisearch-footer {
       display: flex; gap: 16px; padding: 6px 16px; border-top: 1px solid #4a536180;
       font-size: 11px; color: #c9ced650;
     }
-    .eda-spotlight-footer-hint { display: flex; align-items: center; gap: 4px; }
-    .eda-spotlight-footer-key {
+    .eda-omnisearch-footer-hint { display: flex; align-items: center; gap: 4px; }
+    .eda-omnisearch-footer-key {
       font-size: 10px; color: #c9ced6; border: 1px solid #4a536140;
       border-radius: 3px; padding: 0 4px; font-family: inherit; line-height: 1.6;
     }
-    .eda-spotlight-footer-count { margin-left: auto; }
-    .eda-spotlight-highlight { color: #6098ff; font-weight: 600; }
+    .eda-omnisearch-footer-count { margin-left: auto; }
+    .eda-omnisearch-highlight { color: #6098ff; font-weight: 600; }
   `;
   overlay.prepend(style);
   return overlay;
@@ -326,7 +326,7 @@ export function renderNavResults(
   }
 
   if (items.length === 0) {
-    container.innerHTML = `<div class="eda-spotlight-empty">${escapeHtml(emptyMessage)}</div>`;
+    container.innerHTML = `<div class="eda-omnisearch-empty">${escapeHtml(emptyMessage)}</div>`;
     return clampedIndex;
   }
 
@@ -336,12 +336,12 @@ export function renderNavResults(
   items.forEach((item, index) => {
     if (item.section !== currentSection) {
       currentSection = item.section;
-      html += `<div class="eda-spotlight-section">${escapeHtml(currentSection)}</div>`;
+      html += `<div class="eda-omnisearch-section">${escapeHtml(currentSection)}</div>`;
     }
     html += `
-      <button class="eda-spotlight-item" data-index="${index}" data-selected="${index === clampedIndex}" data-href="${escapeAttr(item.href)}">
-        <span class="eda-spotlight-item-label">${highlightMatch(item.label, query)}</span>
-        <span class="eda-spotlight-item-path">${escapeHtml(item.href)}</span>
+      <button class="eda-omnisearch-item" data-index="${index}" data-selected="${index === clampedIndex}" data-href="${escapeAttr(item.href)}">
+        <span class="eda-omnisearch-item-label">${highlightMatch(item.label, query)}</span>
+        <span class="eda-omnisearch-item-path">${escapeHtml(item.href)}</span>
       </button>`;
   });
 
@@ -376,13 +376,13 @@ export function renderEqlAutocompleteView(
 
   if (state.eqlAutocompleteLoading && !autocompleteItems.length) {
     container.dataset.open = 'true';
-    container.innerHTML = '<div class="eda-spotlight-completions-empty">Loading suggestions...</div>';
+    container.innerHTML = '<div class="eda-omnisearch-completions-empty">Loading suggestions...</div>';
     return 0;
   }
 
   if (state.eqlAutocompleteError) {
     container.dataset.open = 'true';
-    container.innerHTML = `<div class="eda-spotlight-completions-empty">${escapeHtml(state.eqlAutocompleteError)}</div>`;
+    container.innerHTML = `<div class="eda-omnisearch-completions-empty">${escapeHtml(state.eqlAutocompleteError)}</div>`;
     return 0;
   }
 
@@ -396,7 +396,7 @@ export function renderEqlAutocompleteView(
   let html = '';
   autocompleteItems.forEach((item, index) => {
     html += `
-      <button class="eda-spotlight-completion-item" data-selected="${index === clampedIndex}" data-eql-autocomplete-index="${index}">
+      <button class="eda-omnisearch-completion-item" data-selected="${index === clampedIndex}" data-eql-autocomplete-index="${index}">
         ${escapeHtml(item.value)}
       </button>`;
   });
@@ -419,26 +419,26 @@ export function renderEqlResultsView(
   }
 
   if (query.length <= 1) {
-    container.innerHTML = '<div class="eda-spotlight-empty">Start typing an EQL query after the dot</div>';
+    container.innerHTML = '<div class="eda-omnisearch-empty">Start typing an EQL query after the dot</div>';
     return;
   }
 
-  let html = '<div class="eda-spotlight-section">EQL Results</div>';
+  let html = '<div class="eda-omnisearch-section">EQL Results</div>';
 
   if (state.eqlLoading && !eqlItems.length) {
-    html += '<div class="eda-spotlight-empty">Running EQL query...</div>';
+    html += '<div class="eda-omnisearch-empty">Running EQL query...</div>';
     container.innerHTML = html;
     return;
   }
 
   if (state.eqlError) {
-    html += `<div class="eda-spotlight-empty">${escapeHtml(state.eqlError)}</div>`;
+    html += `<div class="eda-omnisearch-empty">${escapeHtml(state.eqlError)}</div>`;
     container.innerHTML = html;
     return;
   }
 
   if (!eqlItems.length) {
-    html += '<div class="eda-spotlight-empty">No EQL results</div>';
+    html += '<div class="eda-omnisearch-empty">No EQL results</div>';
     container.innerHTML = html;
     return;
   }
@@ -447,7 +447,7 @@ export function renderEqlResultsView(
   const flattenedRows = displayedItems.map((entry) => flattenResultFields(entry.fields));
   const columns = pickTableColumns(flattenedRows);
 
-  html += '<div class="eda-spotlight-eql-table-wrap"><table class="eda-spotlight-eql-table"><thead><tr>';
+  html += '<div class="eda-omnisearch-eql-table-wrap"><table class="eda-omnisearch-eql-table"><thead><tr>';
   html += '<th>resource</th>';
   for (const column of columns) {
     html += `<th>${escapeHtml(column)}</th>`;
@@ -456,8 +456,8 @@ export function renderEqlResultsView(
 
   displayedItems.forEach((item, index) => {
     const row = flattenedRows[index];
-    html += `<tr class="eda-spotlight-eql-row" data-eql-result-index="${index}">`;
-    html += `<td class="eda-spotlight-eql-cell-resource" title="${escapeAttr(item.path)}">${escapeHtml(item.path)}</td>`;
+    html += `<tr class="eda-omnisearch-eql-row" data-eql-result-index="${index}">`;
+    html += `<td class="eda-omnisearch-eql-cell-resource" title="${escapeAttr(item.path)}">${escapeHtml(item.path)}</td>`;
     for (const column of columns) {
       const value = row.get(column) ?? '';
       html += `<td title="${escapeAttr(value)}">${escapeHtml(value)}</td>`;
@@ -468,7 +468,7 @@ export function renderEqlResultsView(
   html += '</tbody></table></div>';
 
   if (eqlItems.length > displayedItems.length) {
-    html += `<div class="eda-spotlight-eql-note">Showing ${displayedItems.length} of ${eqlItems.length} EQL results</div>`;
+    html += `<div class="eda-omnisearch-eql-note">Showing ${displayedItems.length} of ${eqlItems.length} EQL results</div>`;
   }
 
   container.innerHTML = html;

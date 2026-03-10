@@ -1,11 +1,11 @@
 import { api } from './core/api';
 import {
-  DEFAULT_SPOTLIGHT_HOTKEY,
-  SPOTLIGHT_HOTKEY_STORAGE_KEY,
-  getSpotlightHotkey,
-  matchesSpotlightHotkey,
-  normalizeSpotlightHotkey,
-  type SpotlightHotkey,
+  DEFAULT_OMNISEARCH_HOTKEY,
+  OMNISEARCH_HOTKEY_STORAGE_KEY,
+  getOmnisearchHotkey,
+  matchesOmnisearchHotkey,
+  normalizeOmnisearchHotkey,
+  type OmnisearchHotkey,
 } from './core/settings';
 import {
   APPS_REQUEST_MSG,
@@ -15,16 +15,16 @@ import {
   EQL_AUTOCOMPLETE_RESPONSE_MSG,
   EQL_REQUEST_MSG,
   EQL_RESPONSE_MSG,
-  SPOTLIGHT_BRIDGE_CHANNEL,
-} from './spotlight/constants';
-import { humanizeLabel, processAppsPayload } from './spotlight/catalog';
-import { navigate, triggerWorkflowRun } from './spotlight/navigation';
-import { dedupeAndSortItems, scoreMatch } from './spotlight/search';
-import type { EqlAutocompleteItem, EqlResult, NavItem } from './spotlight/types';
-import { createSpotlightOverlay, renderEqlAutocompleteView, renderEqlResultsView, renderNavResults } from './spotlight/view';
+  OMNISEARCH_BRIDGE_CHANNEL,
+} from './omnisearch/constants';
+import { humanizeLabel, processAppsPayload } from './omnisearch/catalog';
+import { navigate, triggerWorkflowRun } from './omnisearch/navigation';
+import { dedupeAndSortItems, scoreMatch } from './omnisearch/search';
+import type { EqlAutocompleteItem, EqlResult, NavItem } from './omnisearch/types';
+import { createOmnisearchOverlay, renderEqlAutocompleteView, renderEqlResultsView, renderNavResults } from './omnisearch/view';
 
-const SPOTLIGHT_ID = 'eda-ext-spotlight';
-const PAGE_BRIDGE_ID = 'eda-ext-spotlight-page-bridge';
+const OMNISEARCH_ID = 'eda-ext-omnisearch';
+const PAGE_BRIDGE_ID = 'eda-ext-omnisearch-page-bridge';
 const PAGE_TARGET_ORIGIN = window.location.origin === 'null' ? '*' : window.location.origin;
 
 const QUICK_ACTIONS: NavItem[] = [];
@@ -45,10 +45,10 @@ function injectAppsFetcher(): void {
 
   const script = document.createElement('script');
   script.id = PAGE_BRIDGE_ID;
-  script.src = api.runtime.getURL('spotlight-page.js');
+  script.src = api.runtime.getURL('omnisearch-page.js');
   script.async = false;
   script.onerror = () => {
-    apiError = 'Could not load spotlight bridge script';
+    apiError = 'Could not load omnisearch bridge script';
     apiLoading = false;
     if (appRenderCallback) appRenderCallback();
   };
@@ -84,7 +84,7 @@ let eqlAutocompleteLoading = false;
 let eqlAutocompleteError = '';
 let eqlRenderCallback: (() => void) | null = null;
 let messageListenerSetup = false;
-let currentHotkey: SpotlightHotkey = DEFAULT_SPOTLIGHT_HOTKEY;
+let currentHotkey: OmnisearchHotkey = DEFAULT_OMNISEARCH_HOTKEY;
 let hotkeyListenerInitialized = false;
 let hotkeyStorageSyncInitialized = false;
 
@@ -155,7 +155,7 @@ function setupMessageListener(): void {
     if (!event.data || typeof event.data !== 'object') return;
 
     const data = event.data as Record<string, unknown>;
-    if (data.channel !== SPOTLIGHT_BRIDGE_CHANNEL) return;
+    if (data.channel !== OMNISEARCH_BRIDGE_CHANNEL) return;
 
     if (data.type === BRIDGE_READY_MSG) {
       bridgeReady = true;
@@ -222,8 +222,8 @@ function getAllItems(): NavItem[] {
   return dedupeAndSortItems([...QUICK_ACTIONS, ...apiItems]);
 }
 
-function createSpotlight(): HTMLDivElement {
-  return createSpotlightOverlay(SPOTLIGHT_ID);
+function createOmnisearch(): HTMLDivElement {
+  return createOmnisearchOverlay(OMNISEARCH_ID);
 }
 
 function renderResults(
@@ -276,7 +276,7 @@ function sendEqlQuery(query: string): void {
   eqlError = '';
   window.postMessage({
     type: EQL_REQUEST_MSG,
-    channel: SPOTLIGHT_BRIDGE_CHANNEL,
+    channel: OMNISEARCH_BRIDGE_CHANNEL,
     query,
     reqId: eqlLatestReqId,
   }, PAGE_TARGET_ORIGIN);
@@ -290,7 +290,7 @@ function sendEqlAutocompleteQuery(query: string): void {
   eqlAutocompleteItems = [];
   window.postMessage({
     type: EQL_AUTOCOMPLETE_REQUEST_MSG,
-    channel: SPOTLIGHT_BRIDGE_CHANNEL,
+    channel: OMNISEARCH_BRIDGE_CHANNEL,
     query,
     reqId: eqlAutocompleteLatestReqId,
     completionLimit: 10,
@@ -299,7 +299,7 @@ function sendEqlAutocompleteQuery(query: string): void {
 
 function requireElement<T extends Element>(element: T | null, selector: string): T {
   if (!element) {
-    throw new Error(`Spotlight overlay is missing required element: ${selector}`);
+    throw new Error(`Omnisearch overlay is missing required element: ${selector}`);
   }
   return element;
 }
@@ -317,23 +317,23 @@ function requestApps(force = false): void {
       : 'Search bridge did not initialize';
     if (appRenderCallback) appRenderCallback();
   }, 8_000);
-  window.postMessage({ type: APPS_REQUEST_MSG, channel: SPOTLIGHT_BRIDGE_CHANNEL, force }, PAGE_TARGET_ORIGIN);
+  window.postMessage({ type: APPS_REQUEST_MSG, channel: OMNISEARCH_BRIDGE_CHANNEL, force }, PAGE_TARGET_ORIGIN);
 }
 
-function openSpotlight() {
+function openOmnisearch() {
   if (!bridgeReady) injectAppsFetcher();
   if (!apiLoading && (!apiFetched || apiItems.length === 0)) {
     requestApps(!apiFetched);
   }
 
-  const overlay = createSpotlight();
+  const overlay = createOmnisearch();
   document.body.appendChild(overlay);
 
-  const input = requireElement(overlay.querySelector<HTMLInputElement>('.eda-spotlight-input'), '.eda-spotlight-input');
-  const autocomplete = requireElement(overlay.querySelector<HTMLElement>('.eda-spotlight-completions'), '.eda-spotlight-completions');
-  const results = requireElement(overlay.querySelector<HTMLElement>('.eda-spotlight-results'), '.eda-spotlight-results');
-  const backdrop = requireElement(overlay.querySelector<HTMLElement>('.eda-spotlight-backdrop'), '.eda-spotlight-backdrop');
-  const countEl = requireElement(overlay.querySelector<HTMLElement>('.eda-spotlight-footer-count'), '.eda-spotlight-footer-count');
+  const input = requireElement(overlay.querySelector<HTMLInputElement>('.eda-omnisearch-input'), '.eda-omnisearch-input');
+  const autocomplete = requireElement(overlay.querySelector<HTMLElement>('.eda-omnisearch-completions'), '.eda-omnisearch-completions');
+  const results = requireElement(overlay.querySelector<HTMLElement>('.eda-omnisearch-results'), '.eda-omnisearch-results');
+  const backdrop = requireElement(overlay.querySelector<HTMLElement>('.eda-omnisearch-backdrop'), '.eda-omnisearch-backdrop');
+  const countEl = requireElement(overlay.querySelector<HTMLElement>('.eda-omnisearch-footer-count'), '.eda-omnisearch-footer-count');
 
   selectedIndex = 0;
   let eqlMode = false;
@@ -550,7 +550,7 @@ function openSpotlight() {
   results.addEventListener('click', (e) => {
     const target = e.target as HTMLElement;
     const eqlRow = target.closest<HTMLElement>('[data-eql-result-index]');
-    const btn = target.closest<HTMLElement>('.eda-spotlight-item');
+    const btn = target.closest<HTMLElement>('.eda-omnisearch-item');
     if (!eqlRow && !btn) return;
 
     if (eqlMode) {
@@ -578,35 +578,35 @@ function openSpotlight() {
   backdrop.addEventListener('click', close);
 }
 
-function isSpotlightOpen(): boolean {
-  return !!document.getElementById(SPOTLIGHT_ID);
+function isOmnisearchOpen(): boolean {
+  return !!document.getElementById(OMNISEARCH_ID);
 }
 
-function closeSpotlightImmediately(): void {
+function closeOmnisearchImmediately(): void {
   eqlRenderCallback = null;
   appRenderCallback = null;
-  document.getElementById(SPOTLIGHT_ID)?.remove();
+  document.getElementById(OMNISEARCH_ID)?.remove();
 }
 
 /**
- * Initializes spotlight message listeners in the content script and
+ * Initializes omnisearch message listeners in the content script and
  * injects the page bridge so auth token capture can start immediately.
  */
-export function injectSpotlightInterceptor(): void {
+export function injectOmnisearchInterceptor(): void {
   setupMessageListener();
   injectAppsFetcher();
 }
 
 function updateHotkeyFromStorage(rawValue: unknown): void {
-  currentHotkey = normalizeSpotlightHotkey(rawValue);
+  currentHotkey = normalizeOmnisearchHotkey(rawValue);
 }
 
 function syncHotkeyFromStorage(): void {
   void (async () => {
     try {
-      currentHotkey = await getSpotlightHotkey();
+      currentHotkey = await getOmnisearchHotkey();
     } catch {
-      currentHotkey = DEFAULT_SPOTLIGHT_HOTKEY;
+      currentHotkey = DEFAULT_OMNISEARCH_HOTKEY;
     }
   })();
 }
@@ -618,29 +618,29 @@ function ensureHotkeyStorageSync(): void {
 
   api.storage.onChanged.addListener((changes, areaName) => {
     if (areaName !== 'local') return;
-    const hotkeyChange = changes[SPOTLIGHT_HOTKEY_STORAGE_KEY];
+    const hotkeyChange = changes[OMNISEARCH_HOTKEY_STORAGE_KEY];
     if (!hotkeyChange) return;
     updateHotkeyFromStorage(hotkeyChange.newValue);
   });
 }
 
-function handleSpotlightHotkey(event: KeyboardEvent): void {
+function handleOmnisearchHotkey(event: KeyboardEvent): void {
   if (event.repeat) return;
-  if (!matchesSpotlightHotkey(event, currentHotkey)) return;
+  if (!matchesOmnisearchHotkey(event, currentHotkey)) return;
 
   event.preventDefault();
   event.stopPropagation();
 
-  if (isSpotlightOpen()) {
-    closeSpotlightImmediately();
+  if (isOmnisearchOpen()) {
+    closeOmnisearchImmediately();
   } else {
-    openSpotlight();
+    openOmnisearch();
   }
 }
 
-export function initSpotlight(): void {
+export function initOmnisearch(): void {
   ensureHotkeyStorageSync();
   if (hotkeyListenerInitialized) return;
   hotkeyListenerInitialized = true;
-  window.addEventListener('keydown', handleSpotlightHotkey, true);
+  window.addEventListener('keydown', handleOmnisearchHotkey, true);
 }
