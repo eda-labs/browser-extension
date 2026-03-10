@@ -27,7 +27,7 @@ import {
   Tooltip,
   Typography,
 } from '@mui/material';
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useRef, useState, type ChangeEvent } from 'react';
 import { createRoot } from 'react-dom/client';
 import { AutoLoginDialog } from './components/AutoLoginDialog';
 import { DeleteDialog } from './components/DeleteDialog';
@@ -60,6 +60,53 @@ function sameHotkey(left: OmnisearchHotkey, right: OmnisearchHotkey): boolean {
   );
 }
 
+interface SetupProfileFile {
+  version?: number;
+  exportedAt?: string;
+  activeTargetId?: string | null;
+  targets?: unknown;
+  settings?: unknown;
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === 'object' && value !== null;
+}
+
+function normalizeProfileUrl(raw: string): string {
+  const stripped = raw.trim().replace(/^https?:\/\//i, '').replace(/\/+$/, '');
+  return stripped ? `https://${stripped}` : '';
+}
+
+function parseImportedTarget(entry: unknown): TargetProfile | null {
+  if (typeof entry === 'string') {
+    const edaUrl = normalizeProfileUrl(entry);
+    if (!edaUrl) return null;
+    return {
+      id: edaUrl,
+      edaUrl,
+      username: '',
+      password: '',
+      clientSecret: '',
+    };
+  }
+
+  if (!isRecord(entry)) return null;
+
+  const rawEdaUrl = typeof entry.edaUrl === 'string'
+    ? entry.edaUrl
+    : (typeof entry.id === 'string' ? entry.id : '');
+  const edaUrl = normalizeProfileUrl(rawEdaUrl);
+  if (!edaUrl) return null;
+
+  return {
+    id: edaUrl,
+    edaUrl,
+    username: typeof entry.username === 'string' ? entry.username : '',
+    password: '',
+    clientSecret: '',
+  };
+}
+
 function SettingsApp() {
   const [status, setStatus] = useState<ConnectionStatus>('disconnected');
   const [targets, setTargets] = useState<TargetProfile[]>([]);
@@ -74,6 +121,7 @@ function SettingsApp() {
   const [targetSaving, setTargetSaving] = useState(false);
   const [targetError, setTargetError] = useState('');
   const [targetMessage, setTargetMessage] = useState('');
+  const [profileBusy, setProfileBusy] = useState(false);
   const [deleteDialogOpen, setDeleteDialogOpen] = useState(false);
   const [secretDialogOpen, setSecretDialogOpen] = useState(false);
   const [autoLoginDialogOpen, setAutoLoginDialogOpen] = useState(false);
@@ -378,6 +426,136 @@ function SettingsApp() {
     setHotkeyMessage('Discarded local changes.');
   }
 
+  async function handleExportProfile(): Promise<void> {
+    setTargetError('');
+    setTargetMessage('');
+    setProfileBusy(true);
+
+    try {
+      const exportedAt = new Date().toISOString();
+      const profile = {
+        version: 1,
+        exportedAt,
+        activeTargetId,
+        targets: targets.map((target) => ({
+          id: target.id,
+          edaUrl: normalizeProfileUrl(target.edaUrl),
+          username: target.username,
+        })),
+        settings: {
+          autoLogin,
+          omnisearchHotkey: storedHotkey,
+        },
+      };
+
+      const blob = new Blob([JSON.stringify(profile, null, 2)], { type: 'application/json' });
+      const url = URL.createObjectURL(blob);
+      const link = document.createElement('a');
+      link.href = url;
+      link.download = `eda-setup-profile-${exportedAt.slice(0, 10)}.json`;
+      document.body.appendChild(link);
+      link.click();
+      document.body.removeChild(link);
+      URL.revokeObjectURL(url);
+
+      setTargetMessage(`Exported setup profile with ${profile.targets.length} target${profile.targets.length === 1 ? '' : 's'}.`);
+    } catch (err) {
+      setTargetError(err instanceof Error ? err.message : 'Could not export setup profile');
+    } finally {
+      setProfileBusy(false);
+    }
+  }
+
+  async function handleImportProfile(event: ChangeEvent<HTMLInputElement>): Promise<void> {
+    const file = event.target.files?.[0];
+    event.target.value = '';
+    if (!file) return;
+
+    if (status === 'connected' || status === 'connecting') {
+      setTargetError('Disconnect in the popup before importing a setup profile.');
+      setTargetMessage('');
+      return;
+    }
+
+    setTargetError('');
+    setTargetMessage('');
+    setProfileBusy(true);
+
+    try {
+      const text = await file.text();
+      const parsedValue = JSON.parse(text) as unknown;
+      if (!isRecord(parsedValue)) {
+        throw new Error('Invalid setup profile format.');
+      }
+      const parsed = parsedValue as SetupProfileFile;
+
+      const rawTargets = Array.isArray(parsed.targets) ? parsed.targets : [];
+      const importedTargets = rawTargets
+        .map(parseImportedTarget)
+        .filter((target): target is TargetProfile => target !== null);
+
+      if (importedTargets.length === 0) {
+        throw new Error('No valid targets found in setup profile.');
+      }
+
+      const stored = await api.storage.local.get(['targets']);
+      const existingTargets = (stored.targets as TargetProfile[] | undefined) ?? [];
+      const mergedTargets = [...existingTargets];
+
+      let addedCount = 0;
+      let updatedCount = 0;
+
+      for (const importedTarget of importedTargets) {
+        const index = mergedTargets.findIndex((candidate) => candidate.id === importedTarget.id);
+        if (index >= 0) {
+          const previous = mergedTargets[index];
+          mergedTargets[index] = {
+            ...previous,
+            edaUrl: importedTarget.edaUrl,
+            username: importedTarget.username,
+          };
+          updatedCount += 1;
+        } else {
+          mergedTargets.push(importedTarget);
+          addedCount += 1;
+        }
+      }
+
+      const patch: Record<string, unknown> = { targets: mergedTargets };
+
+      const importedSettings = isRecord(parsed.settings) ? parsed.settings : null;
+      if (importedSettings && typeof importedSettings.autoLogin === 'boolean') {
+        patch.autoLogin = importedSettings.autoLogin;
+        setAutoLogin(importedSettings.autoLogin);
+      }
+      if (importedSettings && 'omnisearchHotkey' in importedSettings) {
+        const importedHotkey = normalizeOmnisearchHotkey(importedSettings.omnisearchHotkey);
+        patch[OMNISEARCH_HOTKEY_STORAGE_KEY] = importedHotkey;
+        setStoredHotkey(importedHotkey);
+        setDraftHotkey(importedHotkey);
+      }
+
+      const importedActiveTargetId = typeof parsed.activeTargetId === 'string'
+        ? normalizeProfileUrl(parsed.activeTargetId)
+        : null;
+      if (importedActiveTargetId && mergedTargets.some((target) => target.id === importedActiveTargetId)) {
+        patch.activeTargetId = importedActiveTargetId;
+        setActiveTargetId(importedActiveTargetId);
+      }
+
+      await api.storage.local.set(patch);
+      setTargets(mergedTargets);
+
+      const ignoredCount = rawTargets.length - importedTargets.length;
+      const ignoredText = ignoredCount > 0 ? `, ${ignoredCount} skipped` : '';
+      setTargetMessage(`Imported setup profile: ${addedCount} added, ${updatedCount} updated${ignoredText}. Secrets were not imported.`);
+    } catch (err) {
+      setTargetError(err instanceof Error ? err.message : 'Could not import setup profile');
+    } finally {
+      setProfileBusy(false);
+    }
+  }
+
   return (
     <ThemeProvider theme={theme}>
       <CssBaseline />
@@ -608,6 +786,38 @@ function SettingsApp() {
                     >
                       {targetSaving ? 'Saving...' : 'Save Target'}
                     </Button>
+                  </Stack>
+
+                  <Stack spacing={1}>
+                    <Typography variant="caption" color="text.secondary">
+                      Export/import setup profiles (targets, auto-login, shortcut). Passwords and client secrets are excluded.
+                    </Typography>
+                    <Stack direction={{ xs: 'column', sm: 'row' }} spacing={1} justifyContent="flex-end">
+                      <Button
+                        variant="outlined"
+                        size="small"
+                        onClick={() => void handleExportProfile()}
+                        disabled={profileBusy || loading}
+                      >
+                        Export Profile
+                      </Button>
+                      <Button
+                        variant="outlined"
+                        size="small"
+                        component="label"
+                        disabled={profileBusy || loading}
+                      >
+                        Import Profile
+                        <input
+                          hidden
+                          type="file"
+                          accept="application/json,.json"
+                          onChange={(event) => {
+                            void handleImportProfile(event);
+                          }}
+                        />
+                      </Button>
+                    </Stack>
                   </Stack>
 
                   {(targetError || targetMessage || loading) && (
