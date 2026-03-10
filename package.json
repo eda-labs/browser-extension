@@ -12,7 +12,7 @@
     "dev:chromium:env:no-build": "node dev/launch-chromium-with-extension.mjs",
     "lint": "oxlint . --deny-warnings",
     "typecheck": "tsc --noEmit",
-    "package": "pnpm run build && web-ext lint --source-dir dist/firefox && web-ext build --source-dir dist/firefox --overwrite-dest && web-ext build --source-dir dist/chromium --overwrite-dest",
+    "package": "pnpm run build && web-ext lint --source-dir dist/firefox && web-ext build --source-dir dist/firefox --filename eda_browser_extension_firefox.zip --overwrite-dest && web-ext build --source-dir dist/chromium --filename eda_browser_extension_chromium.zip --overwrite-dest",
     "package:firefox": "pnpm run build:firefox && web-ext lint --source-dir dist/firefox && web-ext sign --source-dir dist/firefox --channel unlisted && mv web-ext-artifacts/*.xpi web-ext-artifacts/eda_browser_extension.xpi",
     "package:chromium": "pnpm run build:chromium && web-ext build --source-dir dist/chromium --overwrite-dest",
     "package:crx": "pnpm run build:chromium && crx3 -o web-ext-artifacts/eda_browser_extension.crx -p key.pem dist/chromium",
