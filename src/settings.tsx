@@ -44,10 +44,12 @@ import {
 } from './core/theme-mode';
 import type { ConnectionStatus, TargetProfile } from './core/types';
 import {
+  AUTO_SIZE_ALL_COLUMNS_STORAGE_KEY,
   createHotkeyFromKeyboardEvent,
   DEFAULT_OMNISEARCH_HOTKEY,
   formatOmnisearchHotkey,
   getOmnisearchHotkey,
+  normalizeAutoSizeAllColumns,
   normalizeOmnisearchHotkey,
   setOmnisearchHotkey,
   OMNISEARCH_HOTKEY_STORAGE_KEY,
@@ -128,6 +130,7 @@ function SettingsApp() {
   const [password, setPassword] = useState('');
   const [clientSecret, setClientSecret] = useState('');
   const [autoLogin, setAutoLogin] = useState(false);
+  const [autoSizeAllColumns, setAutoSizeAllColumns] = useState(false);
   const [targetSaving, setTargetSaving] = useState(false);
   const [targetError, setTargetError] = useState('');
   const [targetMessage, setTargetMessage] = useState('');
@@ -188,6 +191,7 @@ function SettingsApp() {
             'connectionStatus',
             'activeTargetId',
             'autoLogin',
+            AUTO_SIZE_ALL_COLUMNS_STORAGE_KEY,
             EDA_FONT_FAMILY_STORAGE_KEY,
             EDA_THEME_MODE_STORAGE_KEY,
           ]),
@@ -203,6 +207,7 @@ function SettingsApp() {
         setStatus(loadedStatus);
         setActiveTargetId(loadedActiveId);
         setAutoLogin(!!stored.autoLogin);
+        setAutoSizeAllColumns(normalizeAutoSizeAllColumns(stored[AUTO_SIZE_ALL_COLUMNS_STORAGE_KEY]));
         setFontFamily(normalizeStoredFontFamily(stored[EDA_FONT_FAMILY_STORAGE_KEY]));
         setThemeMode(normalizeStoredThemeMode(stored[EDA_THEME_MODE_STORAGE_KEY]));
 
@@ -272,6 +277,10 @@ function SettingsApp() {
 
       if (changes.autoLogin) {
         setAutoLogin(!!changes.autoLogin.newValue);
+      }
+
+      if (changes[AUTO_SIZE_ALL_COLUMNS_STORAGE_KEY]) {
+        setAutoSizeAllColumns(normalizeAutoSizeAllColumns(changes[AUTO_SIZE_ALL_COLUMNS_STORAGE_KEY].newValue));
       }
 
       if (changes[EDA_FONT_FAMILY_STORAGE_KEY]) {
@@ -472,6 +481,7 @@ function SettingsApp() {
         })),
         settings: {
           autoLogin,
+          autoSizeAllColumns,
           omnisearchHotkey: storedHotkey,
         },
       };
@@ -555,6 +565,10 @@ function SettingsApp() {
       if (importedSettings && typeof importedSettings.autoLogin === 'boolean') {
         patch.autoLogin = importedSettings.autoLogin;
         setAutoLogin(importedSettings.autoLogin);
+      }
+      if (importedSettings && typeof importedSettings.autoSizeAllColumns === 'boolean') {
+        patch[AUTO_SIZE_ALL_COLUMNS_STORAGE_KEY] = importedSettings.autoSizeAllColumns;
+        setAutoSizeAllColumns(importedSettings.autoSizeAllColumns);
       }
       if (importedSettings && 'omnisearchHotkey' in importedSettings) {
         const importedHotkey = normalizeOmnisearchHotkey(importedSettings.omnisearchHotkey);
@@ -818,7 +832,7 @@ function SettingsApp() {
 
                   <Stack spacing={1}>
                     <Typography variant="caption" color="text.secondary">
-                      Export/import setup profiles (targets, auto-login, shortcut). Passwords and client secrets are excluded.
+                      Export/import setup profiles (targets, auto-login, autosize columns, shortcut). Passwords and client secrets are excluded.
                     </Typography>
                     <Stack direction={{ xs: 'column', sm: 'row' }} spacing={1} justifyContent="flex-end">
                       <Button
@@ -872,9 +886,29 @@ function SettingsApp() {
                   <Stack direction="row" alignItems="center" spacing={1}>
                     <KeyboardCommandKeyRoundedIcon color="info" fontSize="small" />
                     <Typography variant="subtitle1" sx={{ fontWeight: 700 }}>
-                      Omnisearch Shortcut
+                      Omnisearch & UI
                     </Typography>
                   </Stack>
+
+                  <FormControlLabel
+                    sx={{ ml: 0.25 }}
+                    control={(
+                      <Switch
+                        size="small"
+                        checked={autoSizeAllColumns}
+                        onChange={(event) => {
+                          const nextValue = event.target.checked;
+                          setAutoSizeAllColumns(nextValue);
+                          void api.storage.local.set({ [AUTO_SIZE_ALL_COLUMNS_STORAGE_KEY]: nextValue });
+                        }}
+                      />
+                    )}
+                    label={(
+                      <Typography variant="caption" color="text.secondary">
+                        Always autosize all columns on EDA tables
+                      </Typography>
+                    )}
+                  />
 
                   <Box
                     sx={{

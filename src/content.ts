@@ -1,5 +1,9 @@
 import { api } from './core/api';
 import {
+  AUTO_SIZE_ALL_COLUMNS_STORAGE_KEY,
+  normalizeAutoSizeAllColumns,
+} from './core/settings';
+import {
   detectPreferredFontFamilyFromDocument,
   detectThemeModeFromDocument,
   EDA_FONT_FAMILY_STORAGE_KEY,
@@ -17,6 +21,13 @@ const THEME_MUTATION_ATTRIBUTES = [
   'data-color-scheme',
   'data-mui-color-scheme',
 ];
+const AUTOSIZE_ROUTE_RETRY_DELAYS_MS = [250, 900, 2000, 3600, 6000];
+const AUTOSIZE_OPTIONS = { includeHeaders: true, includeOutliers: true, expand: true };
+const AUTOSIZE_BRIDGE_ID = 'eda-ext-autosize-page-bridge';
+const AUTOSIZE_BRIDGE_CHANNEL = 'eda-autosize-bridge';
+const AUTOSIZE_REQUEST_MSG = 'eda-autosize-request';
+const AUTOSIZE_RESPONSE_MSG = 'eda-autosize-response';
+const AUTOSIZE_REQUEST_TIMEOUT_MS = 2500;
 let omnisearchInitialized = false;
 let omnisearchInterceptorInitialized = false;
 let keepaliveConnected = false;
@@ -26,6 +37,13 @@ let themeSyncTimeout: ReturnType<typeof setTimeout> | null = null;
 let lastStoredThemeMode: ThemeMode | null = null;
 let lastStoredFontFamily: string | null = null;
 let appearanceSyncedOnce = false;
+let autoSizeAllColumnsEnabled = false;
+let autosizeRouteWatcherId: ReturnType<typeof setInterval> | null = null;
+let autosizeLastRouteKey = '';
+let autosizeLastRetryAt = 0;
+let autosizeRunInProgress = false;
+let autosizeScheduleGeneration = 0;
+const autosizedRouteKeys = new Set<string>();
 
 function getOmnisearchModule(): Promise<typeof import('./omnisearch')> {
   if (!omnisearchModulePromise) {
@@ -46,6 +64,190 @@ function isEdaSite(): boolean {
   const desc = document.querySelector('meta[name="description"]');
   if (desc?.getAttribute('content') === 'EDA') return true;
   return location.pathname.startsWith('/ui/');
+}
+
+function isElementVisible(element: Element | null): element is HTMLElement {
+  if (!(element instanceof HTMLElement)) return false;
+  const style = window.getComputedStyle(element);
+  if (style.display === 'none' || style.visibility === 'hidden') return false;
+  const rect = element.getBoundingClientRect();
+  return rect.width > 0 && rect.height > 0;
+}
+
+function getVisibleElements(selectors: string[]): HTMLElement[] {
+  const seen = new Set<HTMLElement>();
+  const out: HTMLElement[] = [];
+
+  for (const selector of selectors) {
+    const candidates = document.querySelectorAll(selector);
+    for (const candidate of Array.from(candidates)) {
+      if (!isElementVisible(candidate) || seen.has(candidate)) continue;
+      seen.add(candidate);
+      out.push(candidate);
+    }
+  }
+
+  return out;
+}
+
+function hasVisibleDataGridRows(): boolean {
+  return getVisibleElements(['.MuiDataGrid-row']).length > 0;
+}
+
+function injectAutosizeBridge(): void {
+  if (document.getElementById(AUTOSIZE_BRIDGE_ID)) return;
+
+  const script = document.createElement('script');
+  script.id = AUTOSIZE_BRIDGE_ID;
+  script.src = api.runtime.getURL('autosize-page.js');
+  script.async = false;
+
+  const root = document.documentElement || document.head;
+  if (!root) {
+    document.addEventListener('DOMContentLoaded', injectAutosizeBridge, { once: true });
+    return;
+  }
+  root.prepend(script);
+}
+
+function getCurrentRouteKey(): string {
+  return `${location.pathname}${location.search}${location.hash}`;
+}
+
+async function runAutosizeAllColumns(): Promise<boolean> {
+  injectAutosizeBridge();
+
+  const requestId = `autosize-${Date.now()}-${Math.random().toString(36).slice(2)}`;
+  let onMessage: ((event: MessageEvent) => void) | null = null;
+
+  const responsePromise = new Promise<boolean>((resolve) => {
+    onMessage = (event: MessageEvent) => {
+      if (event.source !== window) return;
+      if (!event.data || typeof event.data !== 'object') return;
+
+      const data = event.data as Record<string, unknown>;
+      if (data.channel !== AUTOSIZE_BRIDGE_CHANNEL) return;
+      if (data.type !== AUTOSIZE_RESPONSE_MSG) return;
+      if (data.reqId !== requestId) return;
+
+      if (onMessage) {
+        window.removeEventListener('message', onMessage);
+        onMessage = null;
+      }
+      resolve(data.ok === true);
+    };
+
+    window.addEventListener('message', onMessage);
+  });
+
+  const timeoutPromise = new Promise<boolean>((resolve) => {
+    setTimeout(() => {
+      if (onMessage) {
+        window.removeEventListener('message', onMessage);
+        onMessage = null;
+      }
+      resolve(false);
+    }, AUTOSIZE_REQUEST_TIMEOUT_MS);
+  });
+
+  window.postMessage({
+    type: AUTOSIZE_REQUEST_MSG,
+    channel: AUTOSIZE_BRIDGE_CHANNEL,
+    reqId: requestId,
+    options: AUTOSIZE_OPTIONS,
+  }, PAGE_TARGET_ORIGIN);
+
+  return Promise.race([responsePromise, timeoutPromise]);
+}
+
+async function tryAutosizeCurrentRoute(routeKey: string): Promise<void> {
+  if (autosizeRunInProgress) return;
+  if (!autoSizeAllColumnsEnabled || !isEdaSite()) return;
+  if (routeKey !== getCurrentRouteKey()) return;
+  if (autosizedRouteKeys.has(routeKey)) return;
+
+  autosizeRunInProgress = true;
+  try {
+    const hadVisibleRows = hasVisibleDataGridRows();
+    const applied = await runAutosizeAllColumns();
+    if (!applied) return;
+
+    if (!hadVisibleRows) return;
+
+    autosizedRouteKeys.add(routeKey);
+    if (autosizedRouteKeys.size > 120) {
+      autosizedRouteKeys.clear();
+      autosizedRouteKeys.add(routeKey);
+    }
+  } finally {
+    autosizeRunInProgress = false;
+  }
+}
+
+function scheduleAutosizeForRoute(routeKey: string): void {
+  if (!autoSizeAllColumnsEnabled || !isEdaSite()) return;
+  if (autosizedRouteKeys.has(routeKey)) return;
+
+  autosizeLastRetryAt = Date.now();
+  const generation = ++autosizeScheduleGeneration;
+  for (const delayMs of AUTOSIZE_ROUTE_RETRY_DELAYS_MS) {
+    setTimeout(() => {
+      if (generation !== autosizeScheduleGeneration) return;
+      void tryAutosizeCurrentRoute(routeKey);
+    }, delayMs);
+  }
+}
+
+function ensureAutosizeRouteWatcher(): void {
+  if (!isEdaSite() || autosizeRouteWatcherId) return;
+  autosizeLastRouteKey = getCurrentRouteKey();
+
+  autosizeRouteWatcherId = setInterval(() => {
+    const routeKey = getCurrentRouteKey();
+    if (routeKey !== autosizeLastRouteKey) {
+      const previousRouteKey = autosizeLastRouteKey;
+      if (previousRouteKey) {
+        autosizedRouteKeys.delete(previousRouteKey);
+      }
+      autosizeLastRouteKey = routeKey;
+      autosizeLastRetryAt = 0;
+      scheduleAutosizeForRoute(routeKey);
+      return;
+    }
+
+    if (!autoSizeAllColumnsEnabled || autosizedRouteKeys.has(routeKey)) return;
+    if (Date.now() - autosizeLastRetryAt < 5000) return;
+    scheduleAutosizeForRoute(routeKey);
+  }, 500);
+}
+
+function applyAutoSizeSetting(enabled: boolean): void {
+  const changed = autoSizeAllColumnsEnabled !== enabled;
+  autoSizeAllColumnsEnabled = enabled;
+
+  if (!autoSizeAllColumnsEnabled) {
+    autosizeScheduleGeneration += 1;
+    return;
+  }
+
+  if (!isEdaSite()) return;
+
+  ensureAutosizeRouteWatcher();
+  autosizeLastRouteKey = getCurrentRouteKey();
+  if (changed || !autosizedRouteKeys.has(autosizeLastRouteKey)) {
+    scheduleAutosizeForRoute(autosizeLastRouteKey);
+  }
+}
+
+async function loadAutoSizeSetting(): Promise<void> {
+  if (!isEdaSite()) return;
+
+  try {
+    const stored = await api.storage.local.get([AUTO_SIZE_ALL_COLUMNS_STORAGE_KEY]);
+    applyAutoSizeSetting(normalizeAutoSizeAllColumns(stored[AUTO_SIZE_ALL_COLUMNS_STORAGE_KEY]));
+  } catch {
+    // Autosize setting is best effort only.
+  }
 }
 
 async function persistThemeMode(mode: ThemeMode): Promise<void> {
@@ -106,6 +308,7 @@ function ensureThemeObserver(): void {
   document.addEventListener('visibilitychange', () => {
     if (document.visibilityState === 'visible') {
       scheduleThemeSync();
+      scheduleAutosizeForRoute(getCurrentRouteKey());
     }
   });
 }
@@ -207,6 +410,12 @@ void postCurrentStatus();
 
 // React to status changes via storage
 api.storage.onChanged.addListener((changes) => void handleStorageChange(changes));
+api.storage.onChanged.addListener((changes, areaName) => {
+  if (areaName !== 'local') return;
+  const changedSetting = changes[AUTO_SIZE_ALL_COLUMNS_STORAGE_KEY];
+  if (!changedSetting) return;
+  applyAutoSizeSetting(normalizeAutoSizeAllColumns(changedSetting.newValue));
+});
 
 async function tryAutoLogin(): Promise<void> {
   if (!location.href.includes('core/httpproxy/v1/keycloak/realms/eda/protocol/openid-connect/')) return;
@@ -234,6 +443,8 @@ function initEdaFeatures(): void {
   if (!isEdaSite()) return;
   ensureThemeObserver();
   ensureKeepalive();
+  ensureAutosizeRouteWatcher();
+  void loadAutoSizeSetting();
   if (omnisearchInitialized) return;
   omnisearchInitialized = true;
   void (async () => {

@@ -29,7 +29,8 @@
   "web_accessible_resources": [
     {
       "resources": [
-        "omnisearch-page.js"
+        "omnisearch-page.js",
+        "autosize-page.js"
       ],
       "matches": [
         "https://*/*",

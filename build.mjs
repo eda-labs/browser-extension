@@ -18,7 +18,7 @@ if (!targets.length) {
 }
 
 const bgOpts = {
-  entryPoints: ['src/background.ts', 'src/content.ts', 'src/omnisearch-page.ts'],
+  entryPoints: ['src/background.ts', 'src/content.ts', 'src/omnisearch-page.ts', 'src/autosize-page.ts'],
   bundle: true, format: 'iife', target: 'es2020',
 };
 
