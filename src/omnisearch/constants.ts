@@ -5,4 +5,5 @@ export const EQL_RESPONSE_MSG = 'eda-ext-eql-response';
 export const EQL_AUTOCOMPLETE_REQUEST_MSG = 'eda-ext-eql-autocomplete-request';
 export const EQL_AUTOCOMPLETE_RESPONSE_MSG = 'eda-ext-eql-autocomplete-response';
 export const BRIDGE_READY_MSG = 'eda-ext-bridge-ready';
+export const WORKFLOW_RUN_REQUEST_MSG = 'eda-ext-workflow-run';
 export const OMNISEARCH_BRIDGE_CHANNEL = 'eda-ext-omnisearch-bridge';

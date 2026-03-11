@@ -44,13 +44,15 @@ const ITEM_TYPE_BASE_ADJUSTMENT = {
   page: 12,
   resource: 18,
   instance: -24,
+  workflow: 14,
 } as const;
 
 const ITEM_TYPE_SORT_ORDER = {
   resource: 0,
   action: 1,
-  page: 2,
-  instance: 3,
+  workflow: 2,
+  page: 3,
+  instance: 4,
 } as const;
 
 export function navItemTypeSortOrder(item: NavItem): number {

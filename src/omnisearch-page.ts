@@ -8,6 +8,7 @@ import {
   EQL_REQUEST_MSG,
   EQL_RESPONSE_MSG,
   OMNISEARCH_BRIDGE_CHANNEL,
+  WORKFLOW_RUN_REQUEST_MSG,
 } from './omnisearch/constants';
 import {
   buildResourceEqlQueries,
@@ -458,7 +459,52 @@ async function fetchAllResources(force: boolean): Promise<void> {
     const workerCount = Math.min(GROUP_FETCH_CONCURRENCY, groupPlans.length);
     await Promise.all(Array.from({ length: workerCount }, () => groupWorker()));
 
-    const flattened = publishBase(false, true);
+    let flattened = publishBase(false, true);
+
+    // Read workflow types from the Redux store (synchronous) and apply flags
+    // BEFORE the instance enrichment closure captures `flattened`.
+    const workflowTypes = getWorkflowTypesFromStore();
+    if (workflowTypes.length > 0) {
+      const wfKeys = new Set(workflowTypes.map(w => `${w.group}/${w.version}/${w.plural}`));
+      for (const item of flattened) {
+        if (item.isInstance) continue;
+        const key = `${item.group}/${item.version}/${item.plural}`;
+        if (wfKeys.has(key)) {
+          item.workflowCapable = true;
+          wfKeys.delete(key);
+        }
+      }
+      // Add workflow types not already in the resource list
+      const newEntries = workflowTypes.filter(w => wfKeys.has(`${w.group}/${w.version}/${w.plural}`));
+      if (newEntries.length > 0) {
+        flattened = [...flattened, ...newEntries];
+      }
+      state.cachedItems = flattened;
+      state.lastFetchTs = Date.now();
+      post(APPS_RESPONSE_MSG, { data: flattened, loading: true, phase: 'resources' });
+    }
+
+    // If store wasn't ready yet, retry after a short delay
+    if (workflowTypes.length === 0) {
+      setTimeout(() => {
+        const retryTypes = getWorkflowTypesFromStore();
+        if (retryTypes.length === 0) return;
+        const wfKeys = new Set(retryTypes.map(w => `${w.group}/${w.version}/${w.plural}`));
+        const latestState = getState();
+        let changed = false;
+        for (const item of latestState.cachedItems) {
+          if (item.workflowCapable || item.isInstance) continue;
+          const key = `${item.group}/${item.version}/${item.plural}`;
+          if (wfKeys.has(key)) { item.workflowCapable = true; wfKeys.delete(key); changed = true; }
+        }
+        const extras = retryTypes.filter(w => wfKeys.has(`${w.group}/${w.version}/${w.plural}`));
+        if (extras.length > 0) { latestState.cachedItems = [...latestState.cachedItems, ...extras]; changed = true; }
+        if (changed) {
+          latestState.lastFetchTs = Date.now();
+          post(APPS_RESPONSE_MSG, { data: latestState.cachedItems, enriched: true, loading: false, done: true, phase: 'resources' });
+        }
+      }, 3000);
+    }
 
     void (async () => {
       const uniqueResources = new Map<string, ParsedKind>();
@@ -638,9 +684,205 @@ function setupMessageBridge(): void {
       const reqId = typeof data.reqId === 'number' ? data.reqId : 0;
       const completionLimit = typeof data.completionLimit === 'number' ? data.completionLimit : 10;
       void runEqlAutocomplete(query, reqId, completionLimit);
+      return;
+    }
+
+    if (data.type === WORKFLOW_RUN_REQUEST_MSG) {
+      const group = typeof data.group === 'string' ? data.group : '';
+      const version = typeof data.version === 'string' ? data.version : '';
+      const plural = typeof data.plural === 'string' ? data.plural : '';
+      void triggerWorkflowRun(group, version, plural);
     }
   });
 }
+
+// ── React fiber / Redux store access ──
+// The page bridge runs in the EDA page's main world, so we can walk
+// the React fiber tree to reach the Redux store and component state.
+
+/* eslint-disable @typescript-eslint/no-explicit-any */
+function findReactRoot(): any {
+  const root = document.getElementById('root');
+  if (!root) return null;
+  const key = Object.keys(root).find(
+    (k) => k.startsWith('__reactContainer$') || k.startsWith('__reactFiber$'),
+  );
+  return key ? (root as any)[key] : null;
+}
+
+function walkFibers(start: any, predicate: (fiber: any) => boolean): any {
+  if (!start) return null;
+  const visited = new WeakSet();
+  const stack: any[] = [start];
+  while (stack.length) {
+    const fiber = stack.pop();
+    if (!fiber || visited.has(fiber)) continue;
+    visited.add(fiber);
+    if (predicate(fiber)) return fiber;
+    if (fiber.child) stack.push(fiber.child);
+    if (fiber.sibling) stack.push(fiber.sibling);
+  }
+  return null;
+}
+
+function getReduxStore(): any {
+  const root = findReactRoot();
+  const provider = walkFibers(root, (f) => {
+    const store = f.memoizedProps?.store;
+    return Boolean(store?.getState && store?.dispatch);
+  });
+  return provider?.memoizedProps?.store ?? null;
+}
+
+/**
+ * Read workflow-capable resource types from the EDA app's Redux store.
+ * Iterates `manifests.manifests`, picks kinds where `workflow === true`.
+ */
+function getWorkflowTypesFromStore(): ParsedKind[] {
+  const store = getReduxStore();
+  if (!store) return [];
+
+  const storeState = store.getState();
+  const manifests: Record<string, any> = storeState?.manifests?.manifests ?? {};
+  const out: ParsedKind[] = [];
+  const seen = new Set<string>();
+
+  for (const key of Object.keys(manifests)) {
+    const manifest = manifests[key];
+    if (!manifest) continue;
+    const group: string = manifest.group ?? '';
+    const version: string = manifest.version ?? '';
+    if (!group || !version) continue;
+
+    for (const kind of manifest.kinds ?? []) {
+      if (!kind.workflow) continue;
+
+      const plural: string = kind.plural ?? '';
+      const kindName: string = kind.kind ?? '';
+      if (!plural) continue;
+
+      const entryKey = `${group}/${version}/${plural}`;
+      if (seen.has(entryKey)) continue;
+      seen.add(entryKey);
+
+      out.push({
+        plural,
+        kind: kindName,
+        label: kindName,
+        category: '',
+        panel: 'main',
+        group,
+        version,
+        namespaced: kind.namespaced ?? true,
+        workflowCapable: true,
+      });
+    }
+  }
+
+  return out;
+}
+
+
+async function triggerWorkflowRun(group: string, version: string, plural: string): Promise<void> {
+  const store = getReduxStore();
+  if (!store) return;
+
+  const manifests: Record<string, any> = store.getState()?.manifests?.manifests ?? {};
+  let gvk: any = null;
+
+  for (const key of Object.keys(manifests)) {
+    const manifest = manifests[key];
+    if (!manifest || manifest.group !== group) continue;
+    for (const kind of manifest.kinds ?? []) {
+      if (kind.plural === plural) {
+        gvk = { group, version: manifest.version || version, kind: kind.kind };
+        break;
+      }
+    }
+    if (gvk) break;
+  }
+
+  if (!gvk) return;
+
+  if (!window.location.pathname.startsWith('/ui/main/workflows')) {
+    const root = findReactRoot();
+    const routerFiber = walkFibers(root, (f) => Boolean(f.memoizedProps?.router?.navigate));
+    if (routerFiber?.memoizedProps?.router?.navigate) {
+      routerFiber.memoizedProps.router.navigate('/ui/main/workflows');
+    } else {
+      return;
+    }
+  }
+
+  let createBtn: HTMLElement | null = null;
+  for (let i = 0; i < 80; i++) {
+    createBtn = findButtonByText('create') as HTMLElement | null;
+    if (createBtn) break;
+    await new Promise((r) => setTimeout(r, 50));
+  }
+  if (!createBtn) return;
+  createBtn.click();
+
+  const acRoot = await waitForElement('.MuiAutocomplete-root', 4000);
+  if (!acRoot) return;
+
+  const acFiberKey = Object.keys(acRoot).find((k) => k.startsWith('__reactFiber$'));
+  if (!acFiberKey) return;
+
+  let acOnChange: ((event: any, value: any, reason: string) => void) | null = null;
+  let targetOption: any = null;
+
+  for (let attempt = 0; attempt < 60; attempt++) {
+    let fiber = (acRoot as any)[acFiberKey];
+    let d = 0;
+    while (fiber && d < 25) {
+      const props = fiber.memoizedProps;
+      if (props?.onChange && Array.isArray(props?.options) && props.options.length > 0) {
+        acOnChange = props.onChange;
+        targetOption = props.options.find((opt: any) =>
+          opt && ((opt.kind || '').toLowerCase() === gvk.kind.toLowerCase()
+            || (opt.plural || '').toLowerCase() === plural.toLowerCase()),
+        );
+        break;
+      }
+      fiber = fiber.return;
+      d++;
+    }
+    if (targetOption) break;
+    await new Promise((r) => setTimeout(r, 50));
+  }
+
+  if (!acOnChange || !targetOption) return;
+  acOnChange({} as any, targetOption, 'selectOption');
+
+  for (let i = 0; i < 30; i++) {
+    await new Promise((r) => setTimeout(r, 50));
+    const btn = document.getElementById('WorkflowDefinitionSelectionModal-modal-Confirm') as HTMLButtonElement | null;
+    if (btn && !btn.disabled) { btn.click(); return; }
+  }
+}
+
+function waitForElement(selector: string, timeout: number): Promise<Element | null> {
+  return new Promise((resolve) => {
+    const el = document.querySelector(selector);
+    if (el) { resolve(el); return; }
+    const obs = new MutationObserver(() => {
+      const found = document.querySelector(selector);
+      if (found) { obs.disconnect(); resolve(found); }
+    });
+    obs.observe(document.body, { childList: true, subtree: true });
+    setTimeout(() => { obs.disconnect(); resolve(null); }, timeout);
+  });
+}
+
+function findButtonByText(text: string): Element | null {
+  const buttons = document.querySelectorAll('button');
+  for (let i = 0; i < buttons.length; i++) {
+    if ((buttons[i].textContent || '').trim().toLowerCase() === text) return buttons[i];
+  }
+  return null;
+}
+/* eslint-enable @typescript-eslint/no-explicit-any */
 
 patchXhr();
 patchFetch();

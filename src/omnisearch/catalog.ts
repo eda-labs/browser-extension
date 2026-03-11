@@ -147,5 +147,23 @@ export function processAppsPayload(data: unknown, quickActions: NavItem[]): NavI
     items.push({ label, href, section, keywords, itemType: 'resource' });
   }
 
+  // Add "Run: {name}" entries for workflow-capable resources
+  for (const entry of data as ParsedKind[]) {
+    if (!entry.workflowCapable || !entry.plural || !entry.group || !entry.version) continue;
+    if (entry.isInstance) continue;
+
+    const workflowKey = `workflow:${entry.group}/${entry.version}/${entry.plural}`;
+    if (seen.has(workflowKey)) continue;
+    seen.add(workflowKey);
+
+    const kindLabel = humanizeLabel(entry.kind || entry.plural);
+    const label = `Run: ${kindLabel}`;
+    const href = `__workflow__://${entry.group}/${entry.version}/${entry.plural}`;
+    const section = 'Workflows';
+    const keywords = `run workflow new ${kindLabel.toLowerCase()} ${entry.plural.toLowerCase()} ${entry.group.toLowerCase()}`;
+
+    items.push({ label, href, section, keywords, itemType: 'workflow' });
+  }
+
   return items;
 }

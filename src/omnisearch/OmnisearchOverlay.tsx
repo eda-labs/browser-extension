@@ -29,6 +29,7 @@ import {
   EQL_REQUEST_MSG,
   EQL_RESPONSE_MSG,
   OMNISEARCH_BRIDGE_CHANNEL,
+  WORKFLOW_RUN_REQUEST_MSG,
 } from './constants';
 
 // ── Constants ──
@@ -431,7 +432,16 @@ export function OmnisearchOverlay({ mode, fontFamily, getNavState, onClose, subs
   const handleNavItemClick = useCallback(
     (item: NavItem) => {
       onClose();
-      navigate(item.href);
+      if (item.href.startsWith('__workflow__://')) {
+        const parts = item.href.replace('__workflow__://', '').split('/');
+        const [group, version, plural] = parts;
+        window.postMessage(
+          { type: WORKFLOW_RUN_REQUEST_MSG, channel: OMNISEARCH_BRIDGE_CHANNEL, group, version, plural },
+          PAGE_TARGET_ORIGIN,
+        );
+      } else {
+        navigate(item.href);
+      }
     },
     [onClose],
   );
@@ -715,7 +725,7 @@ export function OmnisearchOverlay({ mode, fontFamily, getNavState, onClose, subs
               maxWidth: 200,
             }}
           >
-            {item.href}
+            {item.href.startsWith('__workflow__://') ? 'workflow' : item.href}
           </Typography>
         </ButtonBase>,
       );

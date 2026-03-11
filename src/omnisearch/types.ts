@@ -1,4 +1,4 @@
-export type NavItemType = 'action' | 'page' | 'resource' | 'instance';
+export type NavItemType = 'action' | 'page' | 'resource' | 'instance' | 'workflow';
 
 export interface NavItem {
   label: string;
@@ -33,6 +33,7 @@ export interface ParsedKind {
   instanceName?: string;
   instanceNamespace?: string;
   instanceSearchText?: string;
+  workflowCapable?: boolean;
 }
 
 export interface AppsGroup {
