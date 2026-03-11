@@ -257,8 +257,92 @@ if (location.pathname.startsWith('/ui/')) {
   })();
 }
 
+let workflowLogModulePromise: Promise<typeof import('./workflow-log/WorkflowLogTable')> | null = null;
+
+function formatWorkflowLogs(): void {
+  const logContainer = document.getElementById('WorkflowLog');
+  if (!logContainer || logContainer.dataset.edaFormatted === '1') return;
+
+  let lineDivs = logContainer.querySelectorAll('.css-t86uxs');
+  if (lineDivs.length === 0) {
+    const inner = logContainer.firstElementChild;
+    if (inner) lineDivs = inner.querySelectorAll('div');
+  }
+  const rawLines: string[] = [];
+  for (let i = 0; i < lineDivs.length; i++) {
+    const text = (lineDivs[i].textContent || '').trim();
+    if (text) rawLines.push(text);
+  }
+  if (!rawLines.some((l) => l.startsWith('{'))) return;
+  logContainer.dataset.edaFormatted = '1';
+
+  if (!workflowLogModulePromise) {
+    workflowLogModulePromise = import('./workflow-log/WorkflowLogTable');
+  }
+
+  void (async () => {
+    try {
+      const { WorkflowLogTable, parseLogLines } = await workflowLogModulePromise!;
+      const React = await import('react');
+      const { createRoot } = await import('react-dom/client');
+
+      const rows = parseLogLines(rawLines);
+      if (rows.length === 0) return;
+
+      const mountDiv = document.createElement('div');
+      mountDiv.style.cssText = 'width:100%;height:100%';
+
+      const inner = logContainer.firstElementChild as HTMLElement | null;
+      if (inner) {
+        inner.style.padding = '0';
+        inner.style.height = '100%';
+        inner.replaceChildren(mountDiv);
+      } else {
+        logContainer.replaceChildren(mountDiv);
+      }
+      logContainer.style.overflow = 'hidden';
+
+      const edaRoot = document.getElementById('root') || document.documentElement;
+      const cs = getComputedStyle(edaRoot);
+      const v = (name: string, fallback: string) => cs.getPropertyValue(name).trim() || fallback;
+      const themeVars = {
+        bgDefault: v('--mui-palette-background-default', '#1a222e'),
+        bgPaper: v('--mui-palette-background-paper', '#1a222e'),
+        textPrimary: v('--mui-palette-text-primary', 'rgba(255,255,255,0.87)'),
+        textSecondary: v('--mui-palette-text-secondary', 'rgba(255,255,255,0.6)'),
+        textDisabled: v('--mui-palette-text-disabled', 'rgba(255,255,255,0.38)'),
+        borderColor: v('--mui-palette-TableCell-border', 'rgba(81,81,81,1)'),
+        primaryMain: v('--mui-palette-primary-main', '#1976d2'),
+        errorMain: v('--mui-palette-error-main', '#d32f2f'),
+        actionHover: v('--mui-palette-action-hover', 'rgba(255,255,255,0.08)'),
+        hoverOpacity: v('--mui-palette-action-hoverOpacity', '0.08'),
+        selectedOpacity: v('--mui-palette-action-selectedOpacity', '0.16'),
+        spacing: v('--mui-spacing', '8px'),
+        fontFamily: v('--mui-font-fontFamily', '"Nokia Pure Text", sans-serif'),
+      };
+
+      const root = createRoot(mountDiv);
+      root.render(React.createElement(WorkflowLogTable, { rows, themeVars } as any));
+    } catch (err) {
+      console.error('[eda-ext] workflow log table error:', err);
+    }
+  })();
+}
+
+let workflowLogObserver: MutationObserver | null = null;
+
+function ensureWorkflowLogObserver(): void {
+  if (workflowLogObserver || !isEdaSite()) return;
+  workflowLogObserver = new MutationObserver(() => formatWorkflowLogs());
+  workflowLogObserver.observe(document.body, { childList: true, subtree: true });
+}
+
 if (document.readyState === 'loading') {
-  document.addEventListener('DOMContentLoaded', initEdaFeatures);
+  document.addEventListener('DOMContentLoaded', () => {
+    initEdaFeatures();
+    ensureWorkflowLogObserver();
+  });
 } else {
   initEdaFeatures();
+  ensureWorkflowLogObserver();
 }
