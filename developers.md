@@ -1,45 +1,56 @@
 ## Requirements
 
 - Node.js 18+ (recommended)
-- npm
-- Firefox or Chromium-based browser (Chrome/Edge/Brave)
+- pnpm
+- Firefox, Chromium-based browser (Chrome/Edge/Brave), or Safari (local testing)
 
 ## Install
 
 ```bash
-npm install
+pnpm install
 ```
 
 ## Build and Run
 
-- `npm run build`: production build to `dist/`
-- `npm run watch`: rebuild on source changes
-- `npm run dev`: build and launch in Firefox via `web-ext run`
-- `npm run typecheck`: TypeScript checks (`tsc --noEmit`)
-- `npm run lint`: lint built extension with `web-ext lint`
-- `npm run package`: build + lint + create extension package
-- `npm run clean`: remove `dist/` and `web-ext-artifacts/`
+- `pnpm run build`: production build to `dist/`
+- `pnpm run package:safari`: create Safari zip artifact at `web-ext-artifacts/eda_browser_extension_safari.zip` (unzip before temporary install in Safari)
+- `pnpm run watch`: rebuild on source changes
+- `pnpm run dev`: build and launch in Firefox via `web-ext run`
+- `pnpm run dev:chromium`: build and launch Chromium with the extension loaded, then open the EDA URL from `.env`
+- `pnpm run typecheck`: TypeScript checks (`tsc --noEmit`)
+- `pnpm run lint`: lint built extension with `web-ext lint`
+- `pnpm run package`: build + lint + create extension package
+- `pnpm run clean`: remove `dist/` and `web-ext-artifacts/`
+
+## Dev Launcher (Chromium + .env)
+
+`pnpm run dev:chromium` expects a `.env` file in the repo root. Start from `.env.example`.
+
+Useful variables:
+
+- `EDA_URL`: required base URL to open.
+- `EDA_OPEN_URL=https://...`: optional page to open instead of `EDA_URL`.
 
 ## Browser Support
 
 - Runtime code is written against a `browser`/`chrome` compatible API wrapper.
 - Current development workflow is Firefox-first (`web-ext run`).
-- Current manifest is also Firefox-first (`manifest_version: 3` with `background.scripts` and `browser_specific_settings.gecko`).
-- For Chromium packaging/loading, use a Chromium-specific manifest variant (notably `background.service_worker` instead of `background.scripts`).
+- Base manifest is Firefox-first (`manifest_version: 3` with `background.scripts` and `browser_specific_settings.gecko`).
+- Chromium and Safari builds rewrite background config to `background.service_worker` and remove Firefox-only settings.
 
 ## Development Workflow
 
-1. Run `npm install`.
-2. Run `npm run dev`.
+1. Run `pnpm install`.
+2. Run `pnpm run dev`.
 3. Use the popup to:
    - create/save a target,
    - connect,
    - verify status chip updates,
    - disconnect and/or delete target.
 4. Before submitting changes, run:
-   - `npm run typecheck`
-   - `npm run build`
-   - `npm run lint`
+   - `pnpm run typecheck`
+   - `pnpm run build`
+   - `pnpm run lint`
 
 ## Popup Usage
 

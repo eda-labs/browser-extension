@@ -1,10 +1,10 @@
 import { api } from './core/api';
-import {
-  type EdaState,
-  type StoredConfig,
-  type ConnectResult,
-  type ProxyResponse,
-  type TargetProfile,
+import type {
+  EdaState,
+  StoredConfig,
+  ConnectResult,
+  ProxyResponse,
+  TargetProfile,
 } from './core/types';
 import { getErrorMessage } from './core/utils';
 import { tabIdByOrigin, tabOpenedAtByOrigin, doDirectFetch, doTabFetchFallback, ensureTransportTab } from './core/fetch';
@@ -41,12 +41,26 @@ function notifyTabs(): void {
     edaUrl: state.edaUrl,
   };
   for (const tabId of tabIdByOrigin.values()) {
-    api.tabs.sendMessage(tabId, msg).catch(() => {});
+    void (async () => {
+      try {
+        await api.tabs.sendMessage(tabId, msg);
+      } catch {
+        // Ignore stale/unreachable tabs.
+      }
+    })();
   }
+}
+
+function canRefreshSession(): boolean {
+  return Boolean(state.refreshToken && state.clientSecret);
 }
 
 function scheduleRefresh(): void {
   if (state.refreshTimerId) clearTimeout(state.refreshTimerId);
+  if (!canRefreshSession()) {
+    state.refreshTimerId = null;
+    return;
+  }
   const delay = Math.max(0, state.accessTokenExpiresAt - Date.now() - 30000);
   state.refreshTimerId = setTimeout(() => void refreshAccessToken(), delay);
 }
@@ -118,7 +132,6 @@ async function connect(
 
     await api.storage.local.set({
       edaUrl,
-      clientSecret,
       accessToken: state.accessToken,
       refreshToken: state.refreshToken,
       accessTokenExpiresAt: state.accessTokenExpiresAt,
@@ -133,6 +146,7 @@ async function connect(
     state.status = 'error';
     state.accessToken = null;
     state.refreshToken = null;
+    state.clientSecret = null;
     state.activeTargetId = null;
     await api.storage.local.set({
       connectionStatus: state.status,
@@ -164,14 +178,14 @@ function disconnect(): void {
 async function restoreSession(): Promise<void> {
   const stored = await api.storage.local.get([
     'edaUrl', 'clientSecret', 'accessToken', 'refreshToken', 'accessTokenExpiresAt', 'activeTargetId',
-  ]) as StoredConfig & { activeTargetId?: string };
+  ]) as StoredConfig & { activeTargetId?: string; clientSecret?: string };
 
-  if (!stored.accessToken || !stored.refreshToken || !stored.edaUrl || !stored.clientSecret) return;
+  if (!stored.accessToken || !stored.edaUrl) return;
 
   state.edaUrl = stored.edaUrl;
-  state.clientSecret = stored.clientSecret;
+  state.clientSecret = typeof stored.clientSecret === 'string' ? stored.clientSecret : null;
   state.accessToken = stored.accessToken;
-  state.refreshToken = stored.refreshToken;
+  state.refreshToken = typeof stored.refreshToken === 'string' ? stored.refreshToken : null;
   state.accessTokenExpiresAt = stored.accessTokenExpiresAt ?? 0;
   state.activeTargetId = stored.activeTargetId ?? null;
 
@@ -181,22 +195,41 @@ async function restoreSession(): Promise<void> {
   if (activeTarget) {
     state.username = activeTarget.username;
     state.password = activeTarget.password;
+    if (activeTarget.clientSecret) {
+      state.clientSecret = activeTarget.clientSecret;
+    }
   }
 
   if (Date.now() < state.accessTokenExpiresAt) {
     state.status = 'connected';
     scheduleRefresh();
   } else {
-    await refreshAccessToken();
-    if (state.accessToken) {
-      state.status = 'connected';
+    if (!canRefreshSession()) {
+      disconnect();
+      return;
     }
+    await refreshAccessToken();
+    if (!state.accessToken) return;
+    state.status = 'connected';
   }
   persistStatus();
 }
 
 async function migrateStorage(): Promise<void> {
   const stored = await api.storage.local.get(['edaUrl', 'targets']);
+  if (Array.isArray(stored.targets)) {
+    const normalizedTargets = stored.targets
+      .filter((entry): entry is Record<string, unknown> => Boolean(entry) && typeof entry === 'object')
+      .map((entry) => ({
+        id: typeof entry.id === 'string' ? entry.id : crypto.randomUUID(),
+        edaUrl: typeof entry.edaUrl === 'string' ? entry.edaUrl : '',
+        username: typeof entry.username === 'string' ? entry.username : '',
+        password: typeof entry.password === 'string' ? entry.password : '',
+        clientSecret: typeof entry.clientSecret === 'string' ? entry.clientSecret : '',
+      }))
+      .filter((target) => target.edaUrl);
+    await api.storage.local.set({ targets: normalizedTargets });
+  }
   if (stored.edaUrl && !stored.targets) {
     const target: TargetProfile = {
       id: crypto.randomUUID(),
@@ -212,6 +245,11 @@ async function migrateStorage(): Promise<void> {
   }
 }
 
+const restorePromise: Promise<void> = (async () => {
+  await migrateStorage();
+  await restoreSession();
+})();
+
 async function handleRequest(
   path: string,
   method: string | undefined,
@@ -220,6 +258,18 @@ async function handleRequest(
 ): Promise<ProxyResponse> {
   if (state.status !== 'connected' || !state.accessToken) {
     return { ok: false, status: 0, body: 'Not connected to EDA' };
+  }
+
+  if (Date.now() >= state.accessTokenExpiresAt) {
+    if (canRefreshSession()) {
+      await refreshAccessToken();
+    } else {
+      disconnect();
+      return { ok: false, status: 0, body: 'Session expired. Reconnect to continue.' };
+    }
+    if (state.status !== 'connected' || !state.accessToken) {
+      return { ok: false, status: 0, body: 'Session expired. Reconnect to continue.' };
+    }
   }
 
   const url = state.edaUrl.replace(/\/+$/, '') + path;
@@ -318,10 +368,13 @@ api.runtime.onMessage.addListener((message, sender, sendResponse) => {
     return { ok: false, error: 'Unknown message type' };
   }
 
-  void restorePromise.then(() => handleMessage()).then(sendResponse).catch((err) => {
-    sendResponse({ ok: false, error: getErrorMessage(err) });
-  });
+  void (async () => {
+    try {
+      await restorePromise;
+      sendResponse(await handleMessage());
+    } catch (error) {
+      sendResponse({ ok: false, error: getErrorMessage(error) });
+    }
+  })();
   return true;
 });
-
-const restorePromise = migrateStorage().then(() => restoreSession());

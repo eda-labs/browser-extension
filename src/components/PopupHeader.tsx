@@ -1,8 +1,14 @@
-import { Box, Typography, LinearProgress, Divider } from '@mui/material';
-import { type ConnectionStatus } from '../core/types';
+import SettingsRoundedIcon from '@mui/icons-material/SettingsRounded';
+import { Box, Typography, LinearProgress, Divider, IconButton, Tooltip } from '@mui/material';
+import type { ConnectionStatus } from '../core/types';
 import { StatusChip } from './StatusChip';
 
-export function PopupHeader({ status }: { status: ConnectionStatus }) {
+interface PopupHeaderProps {
+  status: ConnectionStatus;
+  onOpenSettings: () => void;
+}
+
+export function PopupHeader({ status, onOpenSettings }: PopupHeaderProps) {
   return (
     <>
       {status === 'connecting' && <LinearProgress sx={{ height: 3 }} />}
@@ -15,7 +21,19 @@ export function PopupHeader({ status }: { status: ConnectionStatus }) {
             EDA Connection
           </Typography>
         </Box>
-        <StatusChip status={status} />
+        <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.5 }}>
+          <StatusChip status={status} />
+          <Tooltip title="Open settings">
+            <IconButton
+              size="small"
+              color="default"
+              aria-label="Open extension settings"
+              onClick={onOpenSettings}
+            >
+              <SettingsRoundedIcon fontSize="small" />
+            </IconButton>
+          </Tooltip>
+        </Box>
       </Box>
       <Divider />
     </>

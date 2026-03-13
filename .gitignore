@@ -8,3 +8,8 @@ web-ext-artifacts/
 AGENTS.md
 CLAUDE.md
 .DS_Store
+scripts/
+.env
+.env.*
+!.env.example
+.tmp/

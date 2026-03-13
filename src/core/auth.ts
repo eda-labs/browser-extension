@@ -1,5 +1,5 @@
 import { doFetchWithTlsFallback } from './fetch';
-import { type TokenResponse } from './types';
+import type { TokenResponse } from './types';
 
 function parseJson<T>(text: string, errorMessage: string): T {
   try {

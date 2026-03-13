@@ -1,14 +1,17 @@
+import AddRoundedIcon from '@mui/icons-material/AddRounded';
 import { Box, FormControl, InputLabel, Select, MenuItem, Button, Typography } from '@mui/material';
-import { type ConnectionStatus, type TargetProfile } from '../core/types';
+import type { ConnectionStatus, TargetProfile } from '../core/types';
 
 interface TargetSelectorProps {
   targets: TargetProfile[];
   selectedTargetId: string | null;
   activeTargetId: string | null;
   status: ConnectionStatus;
-  isNewTarget: boolean;
+  isNewTarget?: boolean;
   onSelect: (id: string) => void;
-  onNewTarget: () => void;
+  onNewTarget?: () => void;
+  selectLabel?: string;
+  emptyText?: string;
 }
 
 export function TargetSelector({
@@ -16,17 +19,19 @@ export function TargetSelector({
   selectedTargetId,
   activeTargetId,
   status,
-  isNewTarget,
+  isNewTarget = false,
   onSelect,
   onNewTarget,
+  selectLabel = 'Target',
+  emptyText = 'Select a target...',
 }: TargetSelectorProps) {
   return (
     <Box sx={{ px: 2, pt: 1.5, display: 'grid', gap: 1.5 }}>
       <Box sx={{ display: 'flex', gap: 1, alignItems: 'flex-end' }}>
         <FormControl size="small" sx={{ flex: 1 }}>
-          <InputLabel shrink>Target</InputLabel>
+          <InputLabel shrink>{selectLabel}</InputLabel>
           <Select
-            label="Target"
+            label={selectLabel}
             value={isNewTarget ? '' : (selectedTargetId ?? '')}
             onChange={(e) => {
               const id = e.target.value as string;
@@ -35,9 +40,9 @@ export function TargetSelector({
             displayEmpty
             notched
             renderValue={(val) => {
-              if (!val) return <Typography sx={{ color: 'text.secondary', fontSize: 'inherit' }}>Select a target...</Typography>;
-              const t = targets.find((t) => t.id === val);
-              return t ? t.edaUrl : '';
+              if (!val) return <Typography sx={{ color: 'text.secondary', fontSize: 'inherit' }}>{emptyText}</Typography>;
+              const target = targets.find((candidate) => candidate.id === val);
+              return target ? target.edaUrl : '';
             }}
           >
             {targets.map((t) => (
@@ -48,14 +53,16 @@ export function TargetSelector({
             ))}
           </Select>
         </FormControl>
-        <Button
-          variant="contained"
-          onClick={onNewTarget}
-          title="New target"
-          sx={{ minWidth: 0, px: 2, fontSize: 20, height: 40 }}
-        >
-          +
-        </Button>
+        {onNewTarget && (
+          <Button
+            variant="outlined"
+            onClick={onNewTarget}
+            title="Create new target"
+            sx={{ minWidth: 0, px: 1.25, height: 40 }}
+          >
+            <AddRoundedIcon fontSize="small" />
+          </Button>
+        )}
       </Box>
     </Box>
   );

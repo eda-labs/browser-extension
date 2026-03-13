@@ -1,26 +1,41 @@
 {
   "manifest_version": 3,
   "name": "EDA Browser Extension",
-  "version": "1.6",
+  "version": "1.7.0",
   "description": "Allow external web apps to consume the Nokia EDA REST API. Not an official Nokia product.",
-  "permissions": ["storage"],
+  "permissions": [
+    "storage"
+  ],
   "host_permissions": [
-    "https://eda.dev/*",
-    "https://*.eda.dev/*",
-    "https://*/core/httpproxy/v1/keycloak/realms/eda/protocol/openid-connect/*"
+    "https://*/*",
+    "http://*/*"
   ],
   "background": {
-    "scripts": ["background.js"]
+    "scripts": [
+      "background.js"
+    ]
   },
   "content_scripts": [
     {
       "matches": [
-        "https://eda.dev/*",
-        "https://*.eda.dev/*",
-        "https://*/core/httpproxy/v1/keycloak/realms/eda/protocol/openid-connect/*"
+        "<all_urls>"
       ],
-      "js": ["content.js"],
+      "js": [
+        "content.js"
+      ],
       "run_at": "document_start"
+    }
+  ],
+  "web_accessible_resources": [
+    {
+      "resources": [
+        "omnisearch-page.js"
+      ],
+      "matches": [
+        "https://*/*",
+        "https://eda.dev/*",
+        "https://*.eda.dev/*"
+      ]
     }
   ],
   "icons": {
@@ -36,13 +51,19 @@
       "128": "icons/icon-128.png"
     }
   },
+  "options_ui": {
+    "page": "options.html",
+    "open_in_tab": true
+  },
   "browser_specific_settings": {
     "gecko": {
       "id": "eda-browser-connector@ls.cd",
       "strict_min_version": "109.0",
       "data_collection_permissions": {
         "allowed": false,
-        "required": ["none"]
+        "required": [
+          "none"
+        ]
       }
     }
   }

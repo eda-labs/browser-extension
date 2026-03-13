@@ -1,0 +1,31 @@
+{
+  "$schema": "./node_modules/oxlint/configuration_schema.json",
+  "plugins": ["typescript", "unicorn", "oxc", "import", "react", "jsx-a11y", "promise"],
+  "categories": {
+    "correctness": "error",
+    "suspicious": "error",
+    "perf": "error"
+  },
+  "rules": {
+    "react/react-in-jsx-scope": "off",
+    "import/no-unassigned-import": "off",
+    "unicorn/no-array-sort": "off",
+    "unicorn/prefer-add-event-listener": "off",
+    "no-await-in-loop": "off",
+    "@typescript-eslint/no-import-type-side-effects": "error",
+    "@typescript-eslint/no-non-null-assertion": "error",
+    "promise/prefer-await-to-then": "error",
+    "no-use-before-define": ["error", { "functions": false, "classes": true, "variables": true }]
+  },
+  "settings": {
+    "react": {
+      "version": "19.0.0"
+    }
+  },
+  "env": {
+    "builtin": true,
+    "browser": true
+  },
+  "globals": {},
+  "ignorePatterns": ["dist/**", "web-ext-artifacts/**", "scripts/exploration/**"]
+}
