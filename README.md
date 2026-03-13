@@ -2,15 +2,12 @@
 
 A browser extension to let web pages interact with the Nokia EDA HTTP REST API.
 
-## Installation
-
-### Firefox
-
-Simply click on the below badge to install/update:
-
 [![][firefox-dl-badge]][firefox-latest-xpi] 
+[![][cws-badge]][cws-link]
 
-### Chrome/Edge
+# Installation
+
+#### Manual install for Chrome/Edge
 
 Chrome and Edge install this extension as an unpacked directory (not by double-clicking a `.zip`).
 
@@ -51,3 +48,6 @@ If your EDA installation is using self-signed certs, or using a certificate not 
 [firefox-latest-xpi]: https://github.com/eda-labs/browser-extension/releases/latest/download/eda_browser_extension.xpi
 [chrome-latest-crx]: https://github.com/eda-labs/browser-extension/releases/latest/download/eda_browser_extension.crx
 [open-ext-screenshot]: https://github.com/user-attachments/assets/0148140d-9d68-4a1e-ad2f-ced92a7b59dd
+[open-ext-screenshot]: [https://github.com/user-attachments/assets/0148140d-9d68-4a1e-ad2f-ced92a7b59dd
+[cws-badge]: https://developer.chrome.com/static/docs/webstore/branding/image/UV4C4ybeBTsZt43U4xis.png
+[cws-link]: https://chromewebstore.google.com/detail/eda-browser-extension/jlppjajihmljelejdkidjncdnjadafjf
